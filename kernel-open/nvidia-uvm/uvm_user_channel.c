@@ -91,7 +91,13 @@ static NV_STATUS get_rm_channel_resources(uvm_user_channel_t *user_channel, UvmG
 
 static NV_STATUS try_get_uvm_user_channel_group(uvm_gpu_va_space_t *gpu_va_space, NvU32 group_id, uvm_user_channel_group_t **out_channel_group)
 {
-    // TODO: Implement
+    uvm_user_channel_group_t *user_channel_group;
+    list_for_each_entry(user_channel_group, &gpu_va_space->registered_channel_groups, channel_group_node) {
+        if (user_channel_group->group_id == group_id) {
+            *out_channel_group = user_channel_group;
+            break;
+        }
+    }
     return NV_OK;
 }
 
