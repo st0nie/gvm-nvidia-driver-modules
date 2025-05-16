@@ -1040,3 +1040,20 @@ NV_STATUS  NV_API_CALL rm_gpu_ops_ccsl_log_encryption(nvidia_stack_t *sp,
     NV_EXIT_RM_RUNTIME(sp,fp);
     return rmStatus;
 }
+
+
+NV_STATUS  NV_API_CALL rm_gpu_ops_ctrl_cmd_operate_channel_group(nvidia_stack_t *sp,
+                                                                 NvProcessorUuid *uuid,
+                                                                 NvU32 tsgId,
+                                                                 NvU32 runlistId,
+                                                                 NvU32 cmd,
+                                                                 NvP64 pParams,
+                                                                 NvU32 dataSize)
+{
+    NV_STATUS rmStatus;
+    void *fp;
+    NV_ENTER_RM_RUNTIME(sp,fp);
+    nvGpuOpsCtrlCmdOperateChannelGroup(uuid, tsgId, runlistId, cmd, pParams, dataSize);
+    NV_EXIT_RM_RUNTIME(sp,fp);
+    return rmStatus;
+}

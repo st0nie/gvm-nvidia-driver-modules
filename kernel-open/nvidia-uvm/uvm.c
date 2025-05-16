@@ -21,12 +21,14 @@
 
 *******************************************************************************/
 
+#include "nv_uvm_interface.h"
 #include "uvm_api.h"
 #include "uvm_global.h"
 #include "uvm_gpu_replayable_faults.h"
 #include "uvm_tools_init.h"
 #include "uvm_lock.h"
 #include "uvm_test.h"
+#include "uvm_user_channel.h"
 #include "uvm_va_space.h"
 #include "uvm_va_space_mm.h"
 #include "uvm_va_range.h"
@@ -1022,8 +1024,27 @@ static NV_STATUS uvm_api_is_initialized(UVM_IS_INITIALIZED_PARAMS *params, struc
     return NV_OK;
 }
 
-static NV_STATUS uvm_api_ctrl_cmd_operate_kernel_group(UVM_CTRL_CMD_OPERATE_KERNEL_GROUP_PARAMS *params, struct file *filp)
+static NV_STATUS uvm_api_ctrl_cmd_operate_channel_group(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS *params, struct file *filp)
 {
+    uvm_va_space_t *va_space = uvm_va_space_get(filp);
+    uvm_gpu_va_space_t *gpu_va_space;
+    uvm_user_channel_group_t *user_channel_group;
+    NV_STATUS status;
+
+    for_each_gpu_va_space(gpu_va_space, va_space) {
+        list_for_each_entry(user_channel_group, &gpu_va_space->registered_channel_groups, channel_group_node) {
+            status = nvUvmInterfaceCtrlCmdOperateChannelGroup(&user_channel_group->parent->uuid,
+                                                     user_channel_group->group_id,
+                                                     user_channel_group->runlist_id,
+                                                     params->cmd,
+                                                     &params->data,
+                                                     params->dataSize);
+            if (status != NV_OK) {
+                return status;
+            }
+        }
+    }
+
     return NV_OK;
 }
 
@@ -1080,7 +1101,7 @@ static long uvm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
         UVM_ROUTE_CMD_STACK_INIT_CHECK(UVM_ALLOC_DEVICE_P2P,               uvm_api_alloc_device_p2p);
         UVM_ROUTE_CMD_STACK_INIT_CHECK(UVM_CLEAR_ALL_ACCESS_COUNTERS,      uvm_api_clear_all_access_counters);
         UVM_ROUTE_CMD_STACK_NO_INIT_CHECK(UVM_IS_INITIALIZED,              uvm_api_is_initialized);
-        UVM_ROUTE_CMD_STACK_INIT_CHECK(UVM_CTRL_CMD_OPERATE_KERNEL_GROUP,  uvm_api_ctrl_cmd_operate_kernel_group);
+        UVM_ROUTE_CMD_STACK_INIT_CHECK(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP,  uvm_api_ctrl_cmd_operate_channel_group);
     }
 
     // Try the test ioctls if none of the above matched

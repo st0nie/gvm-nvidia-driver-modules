@@ -708,6 +708,7 @@ cleanup:
     return status;
 }
 
+// MARK: Build client with kernel metadata
 static NV_STATUS nvGpuOpsCreateClient(RM_API *pRmApi, NvHandle *hClient)
 {
     NV_STATUS status;
@@ -11344,4 +11345,86 @@ NV_STATUS nvGpuOpsLogEncryption(struct ccslContext_t *ctx,
     }
 
     return ccslLogEncryption(ctx, direction, bufferSize);
+}
+
+NV_STATUS nvGpuOpsCtrlCmdOperateChannelGroup(NvProcessorUuid *uuid,
+                                             NvU32 tsgId,
+                                             NvU32 runlistId,
+                                             NvU32 cmd,
+                                             NvP64 pParams,
+                                             NvU32 dataSize)
+{
+    NV_STATUS status = NV_OK;
+    nvGpuOpsLockSet acquiredLocks;
+    THREAD_STATE_NODE threadState;
+    OBJGPU *pGpu;
+    RM_API *pRmApi;
+    KernelFifo *pKernelFifo;
+    RsResourceRef *pResourceRef;
+    KernelChannelGroup *pKernelChannelGroup;
+    KernelChannelGroupApi *pKernelChannelGroupApi;
+
+    pGpu = gpumgrGetGpuFromUuid(uuid->uuid,
+        DRF_DEF(2080_GPU_CMD, _GPU_GET_GID_FLAGS, _TYPE, _SHA1) |
+        DRF_DEF(2080_GPU_CMD, _GPU_GET_GID_FLAGS, _FORMAT, _BINARY));
+    if (!pGpu) {
+        status = NV_ERR_INVALID_ARGUMENT;
+        goto done;
+    }
+
+    pKernelFifo = GPU_GET_KERNEL_FIFO(pGpu);
+    if (!pKernelFifo) {
+        status = NV_ERR_INVALID_OBJECT;
+        goto done;
+    }
+
+    pKernelChannelGroup = kfifoGetChannelGroup(pGpu, pKernelFifo, tsgId, runlistId);
+    if (!pKernelChannelGroup) {
+        status = NV_ERR_INVALID_ARGUMENT;
+        goto done;
+    }
+    pKernelChannelGroupApi = pKernelChannelGroup->pChanList->pHead->pKernelChannel->pKernelChannelGroupApi;
+    if (!pKernelChannelGroupApi) {
+        status = NV_ERR_INVALID_OBJECT;
+        goto done;
+    }
+
+    threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
+
+    if ((status = _nvGpuOpsLocksAcquireAll(RMAPI_LOCK_FLAGS_READ,
+                                           RES_GET_CLIENT_HANDLE(pKernelChannelGroupApi),
+                                           NULL,
+                                           &acquiredLocks)) != NV_OK)
+    {
+        threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
+        goto done;
+    }
+
+    pRmApi = GPU_GET_PHYSICAL_RMAPI(pGpu);
+    if (!pRmApi) {
+        _nvGpuOpsLocksRelease(&acquiredLocks);
+        threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
+        status = NV_ERR_INVALID_OBJECT;
+        goto done;
+    }
+
+    status = serverutilGetResourceRef(RES_GET_CLIENT_HANDLE(pKernelChannelGroupApi), RES_GET_HANDLE(pKernelChannelGroupApi), &pResourceRef);
+    if (status != NV_OK)
+    {
+        _nvGpuOpsLocksRelease(&acquiredLocks);
+        threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
+        goto done;
+    }
+
+    status = pRmApi->Control(pRmApi,
+                             RES_GET_CLIENT_HANDLE(pKernelChannelGroupApi),
+                             RES_GET_HANDLE(pKernelChannelGroupApi),
+                             cmd,
+                             pParams,
+                             dataSize);
+    _nvGpuOpsLocksRelease(&acquiredLocks);
+    threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
+
+done:
+    return status;
 }

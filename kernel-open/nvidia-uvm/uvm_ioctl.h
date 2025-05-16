@@ -1128,7 +1128,7 @@ typedef struct
     NV_STATUS       rmStatus;    // OUT
 } UVM_IS_INITIALIZED_PARAMS;
 
-#define UVM_CTRL_CMD_OPERATE_KERNEL_GROUP                             UVM_IOCTL_BASE(81)
+#define UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP                             UVM_IOCTL_BASE(81)
 typedef struct
 {
     NvU32           cmd;         // IN
@@ -1137,7 +1137,7 @@ typedef struct
     } data;
     NvU32           dataSize;    // IN
     NV_STATUS       rmStatus;    // OUT
-} UVM_CTRL_CMD_OPERATE_KERNEL_GROUP_PARAMS;
+} UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS;
 
 //
 // Temporary ioctls which should be removed before UVM 8 release

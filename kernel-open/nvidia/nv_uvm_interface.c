@@ -1750,6 +1750,21 @@ NV_STATUS nvUvmInterfaceCslLogEncryption(UvmCslContext *uvmCslContext,
 }
 EXPORT_SYMBOL(nvUvmInterfaceCslLogEncryption);
 
+NV_STATUS nvUvmInterfaceCtrlCmdOperateChannelGroup(NvProcessorUuid *uuid,
+                                                   NvU32 tsgId,
+                                                   NvU32 runlistId,
+                                                   NvU32 cmd,
+                                                   NvP64 pParams,
+                                                   NvU32 dataSize)
+{
+    NV_STATUS status;
+    nvidia_stack_t *sp = nvUvmGetSafeStack();
+    status = rm_gpu_ops_ctrl_cmd_operate_channel_group(sp, uuid, tsgId, runlistId, cmd, pParams, dataSize);
+    nvUvmFreeSafeStack(sp);
+    return status;
+}
+EXPORT_SYMBOL(nvUvmInterfaceCtrlCmdOperateChannelGroup);
+
 #else // NV_UVM_ENABLE
 
 NV_STATUS nv_uvm_suspend(void)
