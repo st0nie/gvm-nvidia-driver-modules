@@ -9329,7 +9329,8 @@ static NV_STATUS nvGpuOpsVerifyChannel(struct gpuAddressSpace *vaSpace,
 
 static NV_STATUS nvGpuOpsGetChannelEngineType(OBJGPU *pGpu,
                                               KernelChannel *pKernelChannel,
-                                              UVM_GPU_CHANNEL_ENGINE_TYPE *engineType)
+                                              UVM_GPU_CHANNEL_ENGINE_TYPE *engineType,
+                                              NvU32 *hwEngineType)
 {
     KernelFifo *pKernelFifo = GPU_GET_KERNEL_FIFO(pGpu);
     NvU32 engDesc;
@@ -9350,6 +9351,8 @@ static NV_STATUS nvGpuOpsGetChannelEngineType(OBJGPU *pGpu,
                                       (NvU32 *)&rmEngineType);
     if (status != NV_OK)
         return status;
+
+    *hwEngineType = rmEngineType;
 
     if (RM_ENGINE_TYPE_IS_GR(rmEngineType))
         *engineType = UVM_GPU_CHANNEL_ENGINE_TYPE_GR;
@@ -9685,7 +9688,7 @@ NV_STATUS nvGpuOpsRetainChannel(struct gpuAddressSpace *vaSpace,
     channel->chId = pKernelChannel->ChID;
     channel->runlistId = kchannelGetRunlistId(pKernelChannel);
 
-    status = nvGpuOpsGetChannelEngineType(pGpu, pKernelChannel, &channel->channelEngineType);
+    status = nvGpuOpsGetChannelEngineType(pGpu, pKernelChannel, &channel->channelEngineType, &channelInstanceInfo->hwChannelEngineType);
     if (status != NV_OK)
         goto error;
 

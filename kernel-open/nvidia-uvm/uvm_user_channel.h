@@ -92,6 +92,8 @@ struct uvm_user_channel_struct
     // Type of the engine the channel is bound to
     UVM_GPU_CHANNEL_ENGINE_TYPE engine_type;
 
+    NvU32 hw_engine_type;
+
     // true if the channel belongs to a subcontext or false if the channel
     // belongs to a regular context
     bool in_subctx;

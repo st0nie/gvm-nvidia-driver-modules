@@ -176,6 +176,7 @@ static NV_STATUS uvm_user_channel_create(uvm_va_space_t *va_space,
     user_channel->hw_channel_id             = channel_info->chId;
     user_channel->num_resources             = channel_info->resourceCount;
     user_channel->engine_type               = channel_info->channelEngineType;
+    user_channel->hw_engine_type            = channel_info->hwChannelEngineType;
     user_channel->in_subctx                 = channel_info->bInSubctx == NV_TRUE;
     user_channel->subctx_id                 = channel_info->subctxId;
     user_channel->tsg.valid                 = channel_info->bTsgChannel == NV_TRUE;
