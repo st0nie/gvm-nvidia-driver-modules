@@ -368,6 +368,7 @@ struct gpuRetainedChannel_struct
     MEMORY_DESCRIPTOR           *instanceMemDesc;
     MEMORY_DESCRIPTOR           *resourceMemDesc[UVM_GPU_CHANNEL_MAX_RESOURCES];
     UVM_GPU_CHANNEL_ENGINE_TYPE channelEngineType;
+    NvU32                       hwChannelEngineType;
     NvU32                       resourceCount;
     NvU32                       chId;
     NvU32                       runlistId;
@@ -9688,7 +9689,7 @@ NV_STATUS nvGpuOpsRetainChannel(struct gpuAddressSpace *vaSpace,
     channel->chId = pKernelChannel->ChID;
     channel->runlistId = kchannelGetRunlistId(pKernelChannel);
 
-    status = nvGpuOpsGetChannelEngineType(pGpu, pKernelChannel, &channel->channelEngineType, &channelInstanceInfo->hwChannelEngineType);
+    status = nvGpuOpsGetChannelEngineType(pGpu, pKernelChannel, &channel->channelEngineType, &channel->hwChannelEngineType);
     if (status != NV_OK)
         goto error;
 
@@ -9795,6 +9796,7 @@ NV_STATUS nvGpuOpsRetainChannel(struct gpuAddressSpace *vaSpace,
     }
 
     channelInstanceInfo->channelEngineType = channel->channelEngineType;
+    channelInstanceInfo->hwChannelEngineType = channel->hwChannelEngineType;
     *retainedChannel = channel;
 
     _nvGpuOpsLocksRelease(&acquiredLocks);
