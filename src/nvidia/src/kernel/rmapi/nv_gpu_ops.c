@@ -11389,6 +11389,8 @@ NV_STATUS nvGpuOpsCtrlCmdOperateChannelGroup(NvProcessorUuid *uuid,
         goto done;
     }
 
+    // Bug: Incorrect order of acquiring lock
+    // TODO: Store pKernelChannelGroupApi handle elsewhere to acquire lock before getting pKernelChannelGroupApi
     threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
 
     if ((status = _nvGpuOpsLocksAcquireAll(RMAPI_LOCK_FLAGS_READ,
@@ -11416,12 +11418,13 @@ NV_STATUS nvGpuOpsCtrlCmdOperateChannelGroup(NvProcessorUuid *uuid,
         goto done;
     }
 
-    status = pRmApi->Control(pRmApi,
-                             RES_GET_CLIENT_HANDLE(pKernelChannelGroupApi),
-                             RES_GET_HANDLE(pKernelChannelGroupApi),
-                             cmd,
-                             pParams,
-                             dataSize);
+    NV_ASSERT_OK(
+        pRmApi->Control(pRmApi,
+                        RES_GET_CLIENT_HANDLE(pKernelChannelGroupApi),
+                        RES_GET_HANDLE(pKernelChannelGroupApi),
+                        cmd,
+                        pParams,
+                        dataSize));
     _nvGpuOpsLocksRelease(&acquiredLocks);
     threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
 
