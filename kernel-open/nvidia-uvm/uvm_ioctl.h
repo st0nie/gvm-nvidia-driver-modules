@@ -1174,6 +1174,13 @@ typedef struct
     NV_STATUS           rmStatus;               // OUT
 } UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS;
 
+#define UVM_SET_GMEMCG                                                UVM_IOCTL_BASE(83)
+typedef struct
+{
+    NvU64               size;     // IN
+    NV_STATUS           rmStatus; // OUT
+} UVM_SET_GMEMCG_PARAMS;
+
 //
 // Temporary ioctls which should be removed before UVM 8 release
 // Number backwards from 2047 - highest custom ioctl function number

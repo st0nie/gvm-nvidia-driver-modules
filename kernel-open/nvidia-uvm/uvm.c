@@ -1070,6 +1070,22 @@ static NV_STATUS uvm_api_ctrl_cmd_operate_channel(UVM_CTRL_CMD_OPERATE_CHANNEL_P
     return NV_OK;
 }
 
+static NV_STATUS uvm_api_set_gmemcg(UVM_SET_GMEMCG_PARAMS *params, struct file *filp)
+{
+    uvm_va_space_t *va_space = uvm_va_space_get(filp);
+    uvm_gpu_id_t id;
+
+    if (!va_space) {
+        return NV_ERR_INVALID_ARGUMENT;
+    }
+
+    for_each_gpu_id(id) {
+        va_space->gmemcghigh[uvm_id_gpu_index(id)] = params->size;
+    }
+
+    return try_charge_gpu_memcg(va_space);
+}
+
 static long uvm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
     switch (cmd)
@@ -1125,6 +1141,7 @@ static long uvm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
         UVM_ROUTE_CMD_STACK_NO_INIT_CHECK(UVM_IS_INITIALIZED,              uvm_api_is_initialized);
         UVM_ROUTE_CMD_STACK_INIT_CHECK(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP,  uvm_api_ctrl_cmd_operate_channel_group);
         UVM_ROUTE_CMD_STACK_INIT_CHECK(UVM_CTRL_CMD_OPERATE_CHANNEL,        uvm_api_ctrl_cmd_operate_channel);
+        UVM_ROUTE_CMD_STACK_INIT_CHECK(UVM_SET_GMEMCG,                      uvm_api_set_gmemcg);
     }
 
     // Try the test ioctls if none of the above matched

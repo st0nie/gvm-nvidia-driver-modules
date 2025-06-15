@@ -158,7 +158,7 @@ static NV_STATUS uvm_va_space_evict_size(uvm_va_space_t *va_space, uvm_gpu_t *gp
                 if (va_block) {
                     gpu_state = uvm_va_block_gpu_state_get(va_block, gpu->id);
                     evicted_size += uvm_page_mask_weight(&gpu_state->resident) * 4096;
-                    status = UVM_VA_BLOCK_LOCK_RETRY(va_block, NULL, block_evict_pages_from_gpu(va_block, gpu, mm));
+                    status = block_evict_pages_from_gpu(va_block, gpu, mm);
                     if (status != NV_OK || evicted_size >= target_size) {
                         goto exit;
                     }
@@ -178,16 +178,26 @@ NV_STATUS try_charge_gpu_memcg(uvm_va_space_t *va_space) {
     size_t rss;
     size_t gmemcghigh;
     NV_STATUS status = NV_OK;
+    bool locked = uvm_check_rwsem_locked_read(&va_space->lock);
+
+    if (!locked) {
+        uvm_down_read(&va_space->lock);
+    }
 
     for_each_gpu_id(id) {
         gpu = uvm_gpu_get(id);
         if (gpu) {
             rss = va_space_calculate_rss(va_space, gpu);
+            printk(KERN_INFO "Charging for gpu %d whose rss is %lld\n", uvm_id_gpu_index(id), rss);
             gmemcghigh = va_space->gmemcghigh[uvm_id_gpu_index(id)];
             if (rss > gmemcghigh) {
                 status = uvm_va_space_evict_size(va_space, gpu, rss - gmemcghigh);
             }
         }
+    }
+
+    if (!locked) {
+        uvm_up_read(&va_space->lock);
     }
 
     return status;
