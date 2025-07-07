@@ -21,6 +21,8 @@
 
 *******************************************************************************/
 
+#include <linux/file.h>
+
 #include "nv_uvm_interface.h"
 #include "uvm_api.h"
 #include "uvm_global.h"
@@ -1023,6 +1025,30 @@ static NV_STATUS uvm_api_is_initialized(UVM_IS_INITIALIZED_PARAMS *params, struc
     params->initialized = (uvm_fd_va_space(filp) != NULL);
     return NV_OK;
 }
+
+int uvm_linux_api_get_task_uvmfd(struct task_struct *task) {
+    int fd;
+    int maxfd;
+    struct file *filep;
+    struct files_struct *filesp = task->files;
+    int uvmfd = -1;
+
+    if (!filesp)
+        return uvmfd;
+    maxfd = filesp->fdt->max_fds;
+
+    for (fd = 0; fd < maxfd && uvmfd == -1; ++fd) {
+        filep = fget_task(task, fd);
+        if (!filep)
+            continue;
+        if (uvm_fd_va_space(filep) != NULL)
+            uvmfd = fd;
+        fput(filep);
+    }
+
+    return uvmfd;
+}
+EXPORT_SYMBOL(uvm_linux_api_get_task_uvmfd);
 
 static NV_STATUS uvm_api_ctrl_cmd_operate_channel_group(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS *params, struct file *filp)
 {
