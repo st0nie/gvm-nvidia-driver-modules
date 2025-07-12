@@ -345,6 +345,8 @@ typedef struct
     __ret;                                \
 })
 
+int uvm_linux_api_get_task_uvmfd(struct task_struct *task);
+
 // Returns whether the input file was opened against the UVM character device
 // file. A NULL input returns false.
 bool uvm_file_is_nvidia_uvm(struct file *filp);

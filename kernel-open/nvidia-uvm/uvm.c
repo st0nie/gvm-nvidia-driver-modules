@@ -1096,6 +1096,7 @@ static NV_STATUS uvm_api_ctrl_cmd_operate_channel(UVM_CTRL_CMD_OPERATE_CHANNEL_P
     return NV_OK;
 }
 
+// Deprecated, take no effect
 static NV_STATUS uvm_api_set_gmemcg(UVM_SET_GMEMCG_PARAMS *params, struct file *filp)
 {
     uvm_va_space_t *va_space = uvm_va_space_get(filp);
@@ -1109,7 +1110,7 @@ static NV_STATUS uvm_api_set_gmemcg(UVM_SET_GMEMCG_PARAMS *params, struct file *
         va_space->gmemcghigh[uvm_id_gpu_index(id)] = params->size;
     }
 
-    return try_charge_gpu_memcg(va_space);
+    return NV_OK;
 }
 
 static long uvm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)

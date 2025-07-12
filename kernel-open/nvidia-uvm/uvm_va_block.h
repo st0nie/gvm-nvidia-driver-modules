@@ -611,8 +611,6 @@ NV_STATUS uvm_va_block_create(uvm_va_range_managed_t *managed_range,
 // to 0. Do not call directly.
 void uvm_va_block_destroy(nv_kref_t *kref);
 
-NV_STATUS try_charge_gpu_memcg(uvm_va_space_t *va_space);
-
 static inline void uvm_va_block_retain(uvm_va_block_t *va_block)
 {
     nv_kref_get(&va_block->kref);
@@ -675,6 +673,10 @@ static inline uvm_va_block_gpu_state_t *uvm_va_block_gpu_state_get(uvm_va_block_
 {
     return va_block->gpus[uvm_id_gpu_index(gpu_id)];
 }
+
+int uvm_linux_api_charge_gpu_memory_high(int fd, u64 current_value, u64 high_value);
+
+size_t uvm_linux_api_get_gpu_rss(int fd);
 
 // Return the va_space pointer of the given block or NULL if the block is dead.
 // Locking: This can be called while holding either the block lock or just the

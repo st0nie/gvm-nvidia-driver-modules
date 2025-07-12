@@ -176,7 +176,7 @@ static NV_STATUS uvm_va_space_evict_size(uvm_va_space_t *va_space, uvm_gpu_t *gp
                             for (chunk_index = 0; chunk_index < va_block_num_chunks; ++chunk_index) {
                                 if (gpu_state->chunks[chunk_index] &&
                                         (gpu_state->chunks[chunk_index]->state == UVM_PMM_GPU_CHUNK_STATE_ALLOCATED ||
-                                        gpu_state->chunks[chunk_index] == UVM_PMM_GPU_CHUNK_STATE_TEMP_PINNED)) {
+                                        gpu_state->chunks[chunk_index]->state == UVM_PMM_GPU_CHUNK_STATE_TEMP_PINNED)) {
                                     free_chunk(pmm, gpu_state->chunks[chunk_index]);
                                     gpu_state->chunks[chunk_index] = NULL;
                                 }
@@ -197,36 +197,68 @@ exit:
     return status;
 }
 
-NV_STATUS try_charge_gpu_memcg(uvm_va_space_t *va_space) {
+size_t uvm_linux_api_get_gpu_rss(int fd) {
+    struct fd f = fdget(fd);
+    size_t max_rss = 0;
     uvm_gpu_id_t id;
     uvm_gpu_t *gpu;
-    size_t rss;
-    size_t gmemcghigh;
-    NV_STATUS status = NV_OK;
-    bool locked = uvm_check_rwsem_locked_read(&va_space->lock);
+    uvm_va_space_t *va_space;
+    size_t current_rss;
 
-    if (!locked) {
-        uvm_down_read(&va_space->lock);
-    }
+    if (!f.file)
+        return -EBADF;
 
+    va_space = uvm_fd_va_space(f.file);
+    if (!va_space)
+        goto out;
+
+    uvm_down_read(&va_space->lock);
     for_each_gpu_id(id) {
         gpu = uvm_gpu_get(id);
-        if (gpu) {
-            rss = va_space_calculate_rss(va_space, gpu);
-            printk(KERN_INFO "Charging for gpu %d whose rss is %lld\n", uvm_id_gpu_index(id), rss);
-            gmemcghigh = va_space->gmemcghigh[uvm_id_gpu_index(id)];
-            if (rss > gmemcghigh) {
-                status = uvm_va_space_evict_size(va_space, gpu, rss - gmemcghigh);
-            }
+        current_rss = va_space_calculate_rss(va_space, gpu);
+        if (current_rss > max_rss)
+            max_rss = current_rss;
+    }
+    uvm_up_read(&va_space->lock);
+
+out:
+    fdput(f);
+    return max_rss;
+}
+EXPORT_SYMBOL(uvm_linux_api_get_gpu_rss);
+
+int uvm_linux_api_charge_gpu_memory_high(int fd, u64 current_value, u64 high_value) {
+    struct fd f = fdget(fd);
+	int error = 0;
+    uvm_gpu_id_t id;
+    uvm_gpu_t *gpu;
+    uvm_va_space_t *va_space;
+
+    if (current_value <= high_value)
+        return 0;
+
+    if (!f.file)
+        return -EBADF;
+
+    va_space = uvm_fd_va_space(f.file);
+    if (!va_space)
+        goto out;
+
+    uvm_down_read(&va_space->lock);
+    for_each_gpu_id(id) {
+        gpu = uvm_gpu_get(id);
+        if (uvm_va_space_evict_size(va_space, gpu, current_value - high_value) != NV_OK) {
+            error = -EINVAL;
+            break;
         }
     }
+    uvm_up_read(&va_space->lock);
 
-    if (!locked) {
-        uvm_up_read(&va_space->lock);
-    }
-
-    return status;
+out:
+    fdput(f);
+    return error;
 }
+EXPORT_SYMBOL(uvm_linux_api_charge_gpu_memory_high);
 
 uvm_va_space_t *uvm_va_block_get_va_space_maybe_dead(uvm_va_block_t *va_block)
 {
@@ -2240,7 +2272,6 @@ static NV_STATUS block_alloc_gpu_chunk(uvm_va_block_t *block,
 
     *out_gpu_chunk = gpu_chunk;
     return NV_OK;
-    // return try_charge_gpu_memcg(va_space);
 }
 
 static bool block_gpu_has_page_tables(uvm_va_block_t *block, uvm_gpu_t *gpu)
