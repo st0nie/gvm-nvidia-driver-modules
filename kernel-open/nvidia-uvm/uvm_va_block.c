@@ -197,38 +197,43 @@ exit:
     return status;
 }
 
-size_t uvm_linux_api_get_gpu_rss(int fd) {
-    struct fd f = fdget(fd);
+size_t uvm_linux_api_get_gpu_rss(struct task_struct *task, int fd) {
+    struct file *filep = fget_task(task, fd);
     size_t max_rss = 0;
     uvm_gpu_id_t id;
     uvm_gpu_t *gpu;
     uvm_va_space_t *va_space;
     size_t current_rss;
 
-    if (!f.file)
+    if (!filep)
         return 0;
 
-    va_space = uvm_fd_va_space(f.file);
+    va_space = uvm_fd_va_space(filep);
+    if (!va_space)
+        printk(KERN_INFO "Uvmfd %d have no va_space init\n", fd);
     if (!va_space)
         goto out;
 
     uvm_down_read(&va_space->lock);
     for_each_gpu_id(id) {
         gpu = uvm_gpu_get(id);
+        if (!gpu)
+            continue;
         current_rss = va_space_calculate_rss(va_space, gpu);
+        printk(KERN_INFO "current_rss is 0x%lx, gpu ptr is 0x%llx\n", current_rss, (u64)gpu);
         if (current_rss > max_rss)
             max_rss = current_rss;
     }
     uvm_up_read(&va_space->lock);
 
 out:
-    fdput(f);
+    fput(filep);
     return max_rss;
 }
 EXPORT_SYMBOL_GPL(uvm_linux_api_get_gpu_rss);
 
-int uvm_linux_api_charge_gpu_memory_high(int fd, u64 current_value, u64 high_value) {
-    struct fd f = fdget(fd);
+int uvm_linux_api_charge_gpu_memory_high(struct task_struct *task, int fd, u64 current_value, u64 high_value) {
+    struct file *filep = fget_task(task, fd);
     int error = 0;
     uvm_gpu_id_t id;
     uvm_gpu_t *gpu;
@@ -237,16 +242,18 @@ int uvm_linux_api_charge_gpu_memory_high(int fd, u64 current_value, u64 high_val
     if (current_value <= high_value)
         return 0;
 
-    if (!f.file)
+    if (!filep)
         return -EBADF;
 
-    va_space = uvm_fd_va_space(f.file);
+    va_space = uvm_fd_va_space(filep);
     if (!va_space)
         goto out;
 
     uvm_down_read(&va_space->lock);
     for_each_gpu_id(id) {
         gpu = uvm_gpu_get(id);
+        if (!gpu)
+            continue;
         if (uvm_va_space_evict_size(va_space, gpu, current_value - high_value) != NV_OK) {
             error = -EINVAL;
             break;
@@ -255,12 +262,12 @@ int uvm_linux_api_charge_gpu_memory_high(int fd, u64 current_value, u64 high_val
     uvm_up_read(&va_space->lock);
 
 out:
-    fdput(f);
+    fput(filep);
     return error;
 }
 EXPORT_SYMBOL_GPL(uvm_linux_api_charge_gpu_memory_high);
 
-int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, size_t size) {
+int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, size_t size, bool uncharge) {
     uvm_va_space_t *va_space;
     struct mm_struct *mm;
     struct task_struct *task;
@@ -279,7 +286,7 @@ int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, size_t size) {
     if (!task)
         return -EINVAL;
 
-    return try_charge_gpu_memcg(task->active_gpucg, size);
+    return (uncharge) ? try_uncharge_gpu_memcg(task->active_gpucg, size) : try_charge_gpu_memcg(task->active_gpucg, size);
 }
 
 uvm_va_space_t *uvm_va_block_get_va_space_maybe_dead(uvm_va_block_t *va_block)
@@ -2295,7 +2302,7 @@ static NV_STATUS block_alloc_gpu_chunk(uvm_va_block_t *block,
     *out_gpu_chunk = gpu_chunk;
 out:
     if (status == NV_OK)
-        uvm_try_charge_gpu_memogy_cgroup(block, size);
+        uvm_try_charge_gpu_memogy_cgroup(block, size, false);
     return status;
 }
 
