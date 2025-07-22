@@ -2254,10 +2254,17 @@ static NV_STATUS block_alloc_gpu_chunk(uvm_va_block_t *block,
 {
     NV_STATUS status = NV_OK;
     uvm_va_space_t *va_space = uvm_va_block_get_va_space_maybe_dead(block);
-    size_t rss = 0;//va_space_calculate_rss(va_space, gpu);
-    size_t gmemcghigh = va_space->gmemcghigh[uvm_id_gpu_index(gpu->id)];
+    size_t rss = 0;
+    size_t gmemcghigh = 0;
     uvm_pmm_alloc_flags_t evict_flags = UVM_PMM_ALLOC_FLAGS_EVICT;
     uvm_gpu_chunk_t *gpu_chunk;
+    struct task_struct *task;
+
+    if (va_space && va_space->va_space_mm.mm)
+        task = va_space->va_space_mm.mm->owner;
+
+    rss = task_get_gpu_memcg_current(task);
+    gmemcghigh = task_get_gpu_memcg_high(task);
 
     // First try getting a free chunk from previously-made allocations.
     gpu_chunk = block_retry_get_free_chunk(retry, gpu, size);
