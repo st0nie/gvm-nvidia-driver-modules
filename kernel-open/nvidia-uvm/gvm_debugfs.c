@@ -6,10 +6,9 @@
 #include <linux/hashtable.h>
 #include <linux/slab.h>
 
-#include "uvm_common.h"
 #include "gvm_debugfs.h"
 #include "uvm_global.h"
-#include "uvm_linux.h"
+#include "uvm_va_space.h"
 
 // Global debugfs root directory
 static struct dentry *gvm_debugfs_root;
@@ -21,11 +20,12 @@ static DEFINE_HASHTABLE(gvm_debugfs_dirs, GVM_DEBUGFS_HASH_BITS);
 static DEFINE_SPINLOCK(gvm_debugfs_lock);
 
 //
-// Declare util functions
+// Forward declarations of util functions
 //
 
-static struct task_struct *gvm_find_task_by_pid(pid_t pid);
-static int gvm_get_active_gpu_count(void);
+static struct task_struct *_gvm_find_task_by_pid(pid_t pid);
+static struct file *_gvm_fget_task(struct task_struct *task, unsigned int fd);
+static int _gvm_get_active_gpu_count(void);
 
 //
 // Per-process debugfs file operations
@@ -38,11 +38,25 @@ static int gvm_process_memory_high_show(struct seq_file *m, void *data)
 
     // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
     // Return dummy value based on PID and GPU ID for demonstration
-    size_t dummy_limit = (gpu_debugfs->pid * 1000) + (gpu_debugfs->gpu_id);
+    size_t dummy_high;
+    {
+        {
+            uvm_va_space_t *va_space = NULL;
+            uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
+            list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node)
+            {
+                if (va_space->pid == gpu_debugfs->pid) {
+                    dummy_high = va_space->pid;
+                    break;
+                }
+            }
+            uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
+        }
+    }
     pr_info("%s: pid=%d, gpu=%d, limit=%zu\n", __func__, gpu_debugfs->pid, gpu_debugfs->gpu_id,
-            dummy_limit);
+            dummy_high);
 
-    seq_printf(m, "%zu\n", dummy_limit);
+    seq_printf(m, "%zu\n", dummy_high);
     return 0;
 }
 
@@ -81,7 +95,19 @@ static int gvm_process_memory_current_show(struct seq_file *m, void *data)
 
     // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
     // Return dummy value based on PID and GPU ID for demonstration
-    size_t dummy_current = (gpu_debugfs->pid * 500) + (gpu_debugfs->gpu_id * 100);
+    size_t dummy_current;
+    {
+        uvm_va_space_t *va_space = NULL;
+        uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
+        list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node)
+        {
+            if (va_space->pid == gpu_debugfs->pid) {
+                dummy_current = va_space->pid;
+                break;
+            }
+        }
+        uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
+    }
     pr_info("%s: pid=%d, gpu=%d, current=%zu\n", __func__, gpu_debugfs->pid, gpu_debugfs->gpu_id,
             dummy_current);
 
@@ -96,7 +122,19 @@ static int gvm_process_compute_high_show(struct seq_file *m, void *data)
 
     // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
     // Return dummy value based on PID and GPU ID for demonstration
-    size_t dummy_high = (gpu_debugfs->pid * 500) + (gpu_debugfs->gpu_id * 100);
+    size_t dummy_high;
+    {
+        uvm_va_space_t *va_space = NULL;
+        uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
+        list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node)
+        {
+            if (va_space->pid == gpu_debugfs->pid) {
+                dummy_high = va_space->pid;
+                break;
+            }
+        }
+        uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
+    }
     pr_info("%s: pid=%d, gpu=%d, high=%zu\n", __func__, gpu_debugfs->pid, gpu_debugfs->gpu_id,
             dummy_high);
 
@@ -110,31 +148,13 @@ static ssize_t gvm_process_compute_high_write(struct file *file, const char __us
 {
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    struct task_struct *task;
-    struct pid *pid_struct;
 
     // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
-    // Return dummy value based on PID and GPU ID for demonstration
+    // Return dummy value based on PID and GPU ID for demonstration.
     size_t dummy_high = (gpu_debugfs->pid * 500) + (gpu_debugfs->gpu_id * 100);
     pr_info("%s: pid=%d, gpu=%d, high=%zu\n", __func__, gpu_debugfs->pid, gpu_debugfs->gpu_id,
             dummy_high);
 
-    // Find the task by PID
-    rcu_read_lock();
-    pid_struct = find_pid_ns(gpu_debugfs->pid, &init_pid_ns);
-    if (pid_struct) {
-        task = pid_task(pid_struct, PIDTYPE_PID);
-        if (task)
-            get_task_struct(task);
-    } else {
-        task = NULL;
-    }
-    rcu_read_unlock();
-
-    if (!task)
-        return -ESRCH;
-
-    put_task_struct(task);
     return count;
 }
 
@@ -148,6 +168,19 @@ static int gvm_process_compute_current_show(struct seq_file *m, void *data)
     size_t dummy_current = (gpu_debugfs->pid * 500) + (gpu_debugfs->gpu_id * 100);
     pr_info("%s: pid=%d, gpu=%d, current=%zu\n", __func__, gpu_debugfs->pid, gpu_debugfs->gpu_id,
             dummy_current);
+
+    {
+        uvm_va_space_t *va_space = NULL;
+        uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
+        list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node)
+        {
+            if (va_space->pid == gpu_debugfs->pid) {
+                dummy_current = va_space->pid;
+                break;
+            }
+        }
+        uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
+    }
 
     seq_printf(m, "%zu\n", dummy_current);
     return 0;
@@ -242,8 +275,6 @@ static const struct file_operations gvm_processes_list_fops = {
 //
 // Per-process directory management
 //
-
-static int gvm_get_active_gpu_count(void);  // Implemented at the end.
 
 int gvm_debugfs_create_process_dir(pid_t pid)
 {
@@ -508,7 +539,7 @@ void gvm_debugfs_exit(void)
 //
 
 // Find the task by PID
-static struct task_struct *gvm_find_task_by_pid(pid_t pid)
+static struct task_struct *_gvm_find_task_by_pid(pid_t pid)
 {
     struct task_struct *task = NULL;
     struct pid *pid_struct;
@@ -526,8 +557,8 @@ static struct task_struct *gvm_find_task_by_pid(pid_t pid)
 }
 
 // Copied from https://elixir.bootlin.com/linux/v6.16/source/fs/file.c#L974
-static inline struct file *_gvm_fget_files_rcu(struct files_struct *files, unsigned int fd,
-                                               fmode_t mask)
+static inline struct file *__gvm_fget_files_rcu(struct files_struct *files, unsigned int fd,
+                                                fmode_t mask)
 {
     for (;;) {
         struct file *file;
@@ -611,59 +642,23 @@ static inline struct file *_gvm_fget_files_rcu(struct files_struct *files, unsig
 }
 
 // Mimicking fget_task(). The caller MUST fput() the returned file.
-static struct file *gvm_fget_task(struct task_struct *task, unsigned int fd)
+static struct file *_gvm_fget_task(struct task_struct *task, unsigned int fd)
 {
     struct file *file = NULL;
 
     task_lock(task);
     if (task->files) {
         rcu_read_lock();
-        file = _gvm_fget_files_rcu(task->files, fd, 0);
+        file = __gvm_fget_files_rcu(task->files, fd, 0);
         rcu_read_unlock();
     }
     task_unlock(task);
 
     return file;
 }
-// static struct file *gvm_fget_task(struct task_struct *task, unsigned int fd)
-// {
-//     struct file *file = NULL;
-//     struct files_struct *files;
-//     struct fdtable *fdt;
-//     struct file __rcu **fdentry;
-
-//     if (unlikely((int) fd < 0))
-//         return NULL;
-
-//     /*
-//      * ->files can change while the task is running, so pin the pointer
-//      * with task_lock().
-//      */
-//     task_lock(task);
-//     files = task->files;
-//     if (!files)
-//         goto out_unlock;
-
-//     /* RCU protects the fdtable itself and its array of file pointers. */
-//     rcu_read_lock();
-
-//     fdt = rcu_dereference_raw(files->fdt);
-//     if (fd >= fdt->max_fds)
-//         goto out_rcu;
-
-//     fdentry = &fdt->fd[fd];
-//     /* get_file_rcu() grabs a reference only if the pointer is still valid */
-//     file = get_file_rcu(fdentry);
-
-// out_rcu:
-//     rcu_read_unlock();
-// out_unlock:
-//     task_unlock(task);
-//     return file; /* may be NULL – caller must check */
-// }
 
 // Get count of active GPUs known to UVM
-static int gvm_get_active_gpu_count(void)
+static int _gvm_get_active_gpu_count(void)
 {
     int count = 0;
     uvm_mutex_lock(&g_uvm_global.global_lock);
