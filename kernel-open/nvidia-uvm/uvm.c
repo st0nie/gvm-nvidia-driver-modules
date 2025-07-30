@@ -44,6 +44,8 @@
 #include "uvm_kvmalloc.h"
 #include "uvm_test_file.h"
 
+#include "gvm_debugfs.h"
+
 #define NVIDIA_UVM_DEVICE_NAME          "nvidia-uvm"
 
 static dev_t g_uvm_base_dev;
@@ -1422,6 +1424,13 @@ static int uvm_init(void)
         goto error;
     }
 
+    // [GVM] Initialize debugfs interface for GPU process control
+    ret = gvm_debugfs_init();
+    if (ret != 0) {
+        UVM_ERR_PRINT("gvm_debugfs_init() failed: %d\n", ret);
+        // Don't fail module load if debugfs fails, just warn
+    }
+
     if (uvm_enable_builtin_tests)
         UVM_INFO_PRINT("Built-in UVM tests are enabled. This is a security risk.\n");
 
@@ -1446,6 +1455,8 @@ static int __init uvm_init_entry(void)
 
 static void uvm_exit(void)
 {
+    // [GVM] Exit debugfs interface for GPU process control
+    gvm_debugfs_exit();
     uvm_tools_exit();
     uvm_chardev_exit();
 

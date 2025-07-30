@@ -1,0 +1,57 @@
+#ifndef _GVM_DEBUGFS_H
+#define _GVM_DEBUGFS_H
+
+#include <linux/debugfs.h>
+#include <linux/sched.h>
+
+#include "uvm_types.h"
+
+//
+// GVM Debugfs interface for GPU process control
+//
+// This provides a per-process debugfs interface that allows cross-process
+// GPU resource management without requiring kernel cgroup modifications.
+//
+
+#define GVM_MAX_PROCESSORS UVM_MAX_PROCESSORS
+
+// Per-GPU debugfs directory structure
+struct gvm_gpu_debugfs {
+    struct dentry *gpu_dir;          // /sys/kernel/debug/nvidia-uvm/processes/<pid>/<gpu_id>/
+    struct dentry *memory_high;      // memory.high file
+    struct dentry *memory_current;   // memory.current file (read-only)
+    struct dentry *compute_high;     // compute.high file
+    struct dentry *compute_current;  // compute.current file
+    pid_t pid;                       // Process ID
+    int gpu_id;                      // GPU ID
+};
+
+// Per-process debugfs directory structure
+struct gvm_process_debugfs {
+    struct hlist_node hash_node;  // Hash table linkage
+    struct dentry *process_dir;   // /sys/kernel/debug/nvidia-uvm/processes/<pid>/
+    struct gvm_gpu_debugfs gpus[GVM_MAX_PROCESSORS];  // Per-GPU subdirectories
+    pid_t pid;                                        // Process ID
+    int num_gpus_created;                             // Number of GPU directories created
+};
+
+// Main debugfs interface functions
+int gvm_debugfs_init(void);
+void gvm_debugfs_exit(void);
+
+// Per-process debugfs management
+int gvm_debugfs_create_process_dir(pid_t pid);
+void gvm_debugfs_remove_process_dir(pid_t pid);
+
+// Process tracking functions (needed by debugfs)
+struct gpu_process_entry *gvm_find_gpu_process(pid_t pid, bool create);
+void gvm_update_gpu_memory_current(pid_t pid, size_t new_current);
+void gvm_set_gpu_memory_limit(pid_t pid, size_t limit);
+
+// Exported functions for cross-process control
+int gvm_linux_api_get_task_uvmfd(struct task_struct *task, int *uvmfds, size_t size);
+int gvm_linux_api_preempt_task(struct task_struct *task, int fd);
+int gvm_linux_api_reschedule_task(struct task_struct *task, int fd);
+size_t gvm_linux_api_get_gpu_rss(struct task_struct *task, int fd);
+
+#endif  // _GVM_DEBUGFS_H
