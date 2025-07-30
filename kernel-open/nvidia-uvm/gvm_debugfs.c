@@ -165,10 +165,7 @@ static int gvm_process_compute_current_show(struct seq_file *m, void *data)
 
     // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
     // Return dummy value based on PID and GPU ID for demonstration
-    size_t dummy_current = (gpu_debugfs->pid * 500) + (gpu_debugfs->gpu_id * 100);
-    pr_info("%s: pid=%d, gpu=%d, current=%zu\n", __func__, gpu_debugfs->pid, gpu_debugfs->gpu_id,
-            dummy_current);
-
+    size_t dummy_current;
     {
         uvm_va_space_t *va_space = NULL;
         uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
@@ -181,6 +178,8 @@ static int gvm_process_compute_current_show(struct seq_file *m, void *data)
         }
         uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
     }
+    pr_info("%s: pid=%d, gpu=%d, current=%zu\n", __func__, gpu_debugfs->pid, gpu_debugfs->gpu_id,
+            dummy_current);
 
     seq_printf(m, "%zu\n", dummy_current);
     return 0;
