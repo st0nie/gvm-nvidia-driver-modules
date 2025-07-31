@@ -36,7 +36,7 @@ static uvm_va_space_t *_gvm_find_va_space_by_pid(pid_t pid);
 static int gvm_process_memory_limit_show(struct seq_file *m, void *data)
 {
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
 
     if (!va_space)
         return -ENOENT;
@@ -53,7 +53,7 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
 {
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
     char buf[32];
     size_t limit;
     int parsed;
@@ -86,7 +86,7 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
 static int gvm_process_memory_current_show(struct seq_file *m, void *data)
 {
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
 
     if (!va_space)
         return -ENOENT;
@@ -101,7 +101,7 @@ static int gvm_process_memory_current_show(struct seq_file *m, void *data)
 static int gvm_process_compute_max_show(struct seq_file *m, void *data)
 {
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
 
     if (!va_space)
         return -ENOENT;
@@ -118,7 +118,7 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
 {
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
     char buf[32];
     size_t max;
     int parsed;
@@ -151,7 +151,7 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
 static int gvm_process_compute_current_show(struct seq_file *m, void *data)
 {
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
 
     if (!va_space)
         return -ENOENT;

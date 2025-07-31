@@ -180,11 +180,10 @@ static bool va_space_check_processors_masks(uvm_va_space_t *va_space)
 // Return whether this is the first va_space belongs to this pid
 static bool uvm_init_gpu_cgroup(uvm_va_space_t *va_space) {
     uvm_va_space_t *existing_va_space;
-    int gpu_index;
     bool found = false;
 
     uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
-    list_for_each_entry(existing_va_space, g_uvm_global->va_spaces, list_node) {
+    list_for_each_entry(existing_va_space, &g_uvm_global.va_spaces.list, list_node) {
         if (existing_va_space->pid == va_space->pid) {
             va_space->gpu_cgroup = existing_va_space->gpu_cgroup;
             found = true;
@@ -203,11 +202,10 @@ static bool uvm_init_gpu_cgroup(uvm_va_space_t *va_space) {
 // Return whether this is the last deiniting va_space belongs to this pid
 static bool uvm_deinit_gpu_cgroup(uvm_va_space_t *va_space) {
     uvm_va_space_t *existing_va_space;
-    int gpu_index;
     bool found = false;
 
     uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
-    list_for_each_entry(existing_va_space, g_uvm_global->va_spaces, list_node) {
+    list_for_each_entry(existing_va_space, &g_uvm_global.va_spaces.list, list_node) {
         if (existing_va_space->pid == va_space->pid) {
             found = true;
             break;
@@ -245,7 +243,7 @@ NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va
         gvm_debugfs_create_process_dir(va_space->pid);
 
     if (!va_space->gpu_cgroup)
-        return NV_ERR_NO_MEMORY
+        return NV_ERR_NO_MEMORY;
 
     uvm_init_rwsem(&va_space->lock, UVM_LOCK_ORDER_VA_SPACE);
     uvm_mutex_init(&va_space->closest_processors.mask_mutex, UVM_LOCK_ORDER_LEAF);
