@@ -148,6 +148,21 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
 {
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    char buf[32];
+    size_t limit;
+    int parsed;
+
+    if (count >= sizeof(buf))
+        return -EINVAL;
+
+    if (copy_from_user(buf, user_buf, count))
+        return -EFAULT;
+
+    buf[count] = '\0';
+
+    parsed = kstrtoul(buf, 10, (unsigned long *) &limit);
+    if (parsed != 0)
+        return -EINVAL;
 
     // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
     // Return dummy value based on PID and GPU ID for demonstration.
