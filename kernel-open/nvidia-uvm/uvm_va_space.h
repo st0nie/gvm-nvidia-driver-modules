@@ -141,6 +141,15 @@ struct uvm_gpu_va_space_struct
     uvm_ats_gpu_va_space_t ats;
 };
 
+struct uvm_gpu_cgroup_struct
+{
+    size_t memory_limit;
+    size_t memory_current;
+
+    size_t compute_max;
+    size_t compute_current;
+};
+
 typedef struct
 {
     int                  numa_node;
@@ -340,7 +349,7 @@ struct uvm_va_space_struct
     // Array of GPU VA spaces
     uvm_gpu_va_space_t *gpu_va_spaces[UVM_ID_MAX_GPUS];
 
-    size_t gmemcghigh[UVM_ID_MAX_GPUS];
+    uvm_gpu_cgroup_t *gpu_cgroup[UVM_ID_MAX_GPUS];
 
     // Tracking of GPU VA spaces which have dropped the VA space lock and are
     // pending destruction. uvm_va_space_mm_shutdown has to wait for those

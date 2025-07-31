@@ -82,7 +82,6 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
     if (parsed != 0)
         return -EINVAL;
 
-	uvm_debugfs_api_get_gpu_rss(gpu_debugfs->pid, )
     pr_info("%s: pid=%d, gpu=%d, limit=%zu\n", __func__, gpu_debugfs->pid, uvm_id_gpu_index(gpu_debugfs->gpu_id),
             limit);
     return count;

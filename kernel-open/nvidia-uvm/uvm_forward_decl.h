@@ -73,6 +73,7 @@ typedef struct uvm_va_space_mm_struct uvm_va_space_mm_t;
 typedef struct uvm_make_resident_context_struct uvm_make_resident_context_t;
 
 typedef struct uvm_gpu_va_space_struct uvm_gpu_va_space_t;
+typedef struct uvm_gpu_cgroup_struct uvm_gpu_cgroup_t;
 
 typedef struct uvm_thread_context_lock_struct uvm_thread_context_lock_t;
 typedef struct uvm_thread_context_struct uvm_thread_context_t;

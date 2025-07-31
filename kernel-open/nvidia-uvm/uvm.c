@@ -1212,14 +1212,9 @@ static NV_STATUS uvm_api_ctrl_cmd_operate_channel(UVM_CTRL_CMD_OPERATE_CHANNEL_P
 static NV_STATUS uvm_api_set_gmemcg(UVM_SET_GMEMCG_PARAMS *params, struct file *filp)
 {
     uvm_va_space_t *va_space = uvm_va_space_get(filp);
-    uvm_gpu_id_t id;
 
     if (!va_space) {
         return NV_ERR_INVALID_ARGUMENT;
-    }
-
-    for_each_gpu_id(id) {
-        va_space->gmemcghigh[uvm_id_gpu_index(id)] = params->size;
     }
 
     return NV_OK;
