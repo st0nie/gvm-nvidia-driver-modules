@@ -177,6 +177,51 @@ static bool va_space_check_processors_masks(uvm_va_space_t *va_space)
     return true;
 }
 
+// Return whether this is the first va_space belongs to this pid
+static bool uvm_init_gpu_cgroup(uvm_va_space_t *va_space) {
+    uvm_va_space_t *existing_va_space;
+    int gpu_index;
+    bool found = false;
+
+    uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
+    list_for_each_entry(existing_va_space, g_uvm_global->va_spaces, list_node) {
+        if (existing_va_space->pid == va_space->pid) {
+            va_space->gpu_cgroup = existing_va_space->gpu_cgroup;
+            found = true;
+            break;
+        }
+    }
+    uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
+
+    if (!found) {
+        va_space->gpu_cgroup = (uvm_gpu_cgroup_t *)uvm_kvmalloc_zero(sizeof(uvm_gpu_cgroup_t) * UVM_ID_MAX_GPUS);
+    }
+
+    return !found;
+}
+
+// Return whether this is the last deiniting va_space belongs to this pid
+static bool uvm_deinit_gpu_cgroup(uvm_va_space_t *va_space) {
+    uvm_va_space_t *existing_va_space;
+    int gpu_index;
+    bool found = false;
+
+    uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
+    list_for_each_entry(existing_va_space, g_uvm_global->va_spaces, list_node) {
+        if (existing_va_space->pid == va_space->pid) {
+            found = true;
+            break;
+        }
+    }
+    uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
+
+    if (!found) {
+        uvm_kvfree(va_space->gpu_cgroup);
+    }
+
+    return !found;
+}
+
 NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va_space_ptr, NvU64 flags)
 {
     NV_STATUS status;
@@ -194,6 +239,13 @@ NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va
 
     // Store the process ID for debugfs tracking
     va_space->pid = current->pid;
+
+    // Create debugfs directory for this process
+    if (uvm_init_gpu_cgroup(va_space) && va_space->gpu_cgroup)
+        gvm_debugfs_create_process_dir(va_space->pid);
+
+    if (!va_space->gpu_cgroup)
+        return NV_ERR_NO_MEMORY
 
     uvm_init_rwsem(&va_space->lock, UVM_LOCK_ORDER_VA_SPACE);
     uvm_mutex_init(&va_space->closest_processors.mask_mutex, UVM_LOCK_ORDER_LEAF);
@@ -278,9 +330,6 @@ NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va
     uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
     list_add_tail(&va_space->list_node, &g_uvm_global.va_spaces.list);
     uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
-
-    // Create debugfs directory for this process
-    gvm_debugfs_create_process_dir(va_space->pid);
 
     *va_space_ptr = va_space;
 
@@ -629,7 +678,8 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
     uvm_mutex_unlock(&g_uvm_global.global_lock);
 
     // Remove debugfs directory for this process
-    gvm_debugfs_remove_process_dir(va_space->pid);
+    if (uvm_deinit_gpu_cgroup(va_space))
+        gvm_debugfs_remove_process_dir(va_space->pid);
 
     uvm_kvfree(va_space->mapping);
     uvm_kvfree(va_space);
@@ -940,6 +990,8 @@ NV_STATUS uvm_va_space_register_gpu(uvm_va_space_t *va_space,
     }
 
     // Create debugfs GPU directory for this process
+    va_space->gpu_cgroup[uvm_id_gpu_index(gpu->id)].compute_max = 100;
+    va_space->gpu_cgroup[uvm_id_gpu_index(gpu->id)].memory_limit = -1ULL;
     gvm_debugfs_create_gpu_dir(va_space->pid, gpu->id);
 
     goto done;
