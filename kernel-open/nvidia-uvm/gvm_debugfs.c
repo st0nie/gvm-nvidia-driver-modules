@@ -42,8 +42,8 @@ static int gvm_process_memory_limit_show(struct seq_file *m, void *data)
         return -ENOENT;
 
     UVM_ASSERT(va_space->gpu_cgroup != NULL);
-
     seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit);
+
     return 0;
 }
 
@@ -53,9 +53,13 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
 {
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
     char buf[32];
     size_t limit;
     int parsed;
+
+    if (!va_space)
+        return -ENOENT;
 
     if (count >= sizeof(buf))
         return -EINVAL;
@@ -69,8 +73,12 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
     if (parsed != 0)
         return -EINVAL;
 
-    pr_info("%s: pid=%d, gpu=%d, limit=%zu\n", __func__, gpu_debugfs->pid, uvm_id_gpu_index(gpu_debugfs->gpu_id),
-            limit);
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit = limit;
+
+    // TODO
+    // Charge memory usage
+
     return count;
 }
 
@@ -78,26 +86,14 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
 static int gvm_process_memory_current_show(struct seq_file *m, void *data)
 {
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
 
-    // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
-    // Return dummy value based on PID and GPU ID for demonstration
-    size_t dummy_current;
-    {
-        uvm_va_space_t *va_space = NULL;
-        uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
-        list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node)
-        {
-            if (va_space->pid == gpu_debugfs->pid) {
-                dummy_current = va_space->pid;
-                break;
-            }
-        }
-        uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
-    }
-    pr_info("%s: pid=%d, gpu=%d, current=%zu\n", __func__, gpu_debugfs->pid, uvm_id_gpu_index(gpu_debugfs->gpu_id),
-            dummy_current);
+    if (!va_space)
+        return -ENOENT;
 
-    seq_printf(m, "%zu\n", dummy_current);
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_current);
+
     return 0;
 }
 
@@ -105,26 +101,14 @@ static int gvm_process_memory_current_show(struct seq_file *m, void *data)
 static int gvm_process_compute_max_show(struct seq_file *m, void *data)
 {
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
 
-    // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
-    // Return dummy value based on PID and GPU ID for demonstration
-    size_t dummy_max;
-    {
-        uvm_va_space_t *va_space = NULL;
-        uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
-        list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node)
-        {
-            if (va_space->pid == gpu_debugfs->pid) {
-                dummy_max = va_space->pid;
-                break;
-            }
-        }
-        uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
-    }
-    pr_info("%s: pid=%d, gpu=%d, max=%zu\n", __func__, gpu_debugfs->pid, uvm_id_gpu_index(gpu_debugfs->gpu_id),
-            dummy_max);
+    if (!va_space)
+        return -ENOENT;
 
-    seq_printf(m, "%zu\n", dummy_max);
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_max);
+
     return 0;
 }
 
@@ -134,9 +118,13 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
 {
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
     char buf[32];
     size_t max;
     int parsed;
+
+    if (!va_space)
+        return -ENOENT;
 
     if (count >= sizeof(buf))
         return -EINVAL;
@@ -150,11 +138,11 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
     if (parsed != 0)
         return -EINVAL;
 
-    // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
-    // Return dummy value based on PID and GPU ID for demonstration.
-    size_t dummy_max = (gpu_debugfs->pid * 500) + (uvm_id_gpu_index(gpu_debugfs->gpu_id) * 100);
-    pr_info("%s: pid=%d, gpu=%d, max=%zu\n", __func__, gpu_debugfs->pid, uvm_id_gpu_index(gpu_debugfs->gpu_id),
-            dummy_max);
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_max = max;
+
+    // TODO
+    // Set timeslice or preempt
 
     return count;
 }
@@ -163,26 +151,14 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
 static int gvm_process_compute_current_show(struct seq_file *m, void *data)
 {
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid);
 
-    // TODO: Should read from the metadata datastructure in target pid's uvm_va_space.
-    // Return dummy value based on PID and GPU ID for demonstration
-    size_t dummy_current;
-    {
-        uvm_va_space_t *va_space = NULL;
-        uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
-        list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node)
-        {
-            if (va_space->pid == gpu_debugfs->pid) {
-                dummy_current = va_space->pid;
-                break;
-            }
-        }
-        uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
-    }
-    pr_info("%s: pid=%d, gpu=%d, current=%zu\n", __func__, gpu_debugfs->pid, uvm_id_gpu_index(gpu_debugfs->gpu_id),
-            dummy_current);
+    if (!va_space)
+        return -ENOENT;
 
-    seq_printf(m, "%zu\n", dummy_current);
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_current);
+
     return 0;
 }
 
