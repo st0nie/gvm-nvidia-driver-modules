@@ -43,6 +43,7 @@
 #include "uvm_test_ioctl.h"
 #include "uvm_va_policy.h"
 #include "uvm_conf_computing.h"
+#include "gvm_debugfs.h"
 
 typedef enum
 {
@@ -198,8 +199,38 @@ exit:
     return status;
 }
 
+size_t uvm_debugfs_api_get_gpu_rss(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
+    uvm_gpu_t *gpu = uvm_gpu_get(gpu_id);
+    size_t gpu_rss = 0;
+
+    if (!gpu)
+        return 0;
+
+    uvm_down_read(&va_space->lock);
+    gpu_rss = va_space_calculate_rss(va_space, gpu);
+    uvm_up_read(&va_space->lock);
+
+    return gpu_rss;
+}
+
+int uvm_debugfs_api_charge_gpu_memory_limit(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t current_value, size_t limit_value) {
+    uvm_gpu_t *gpu = uvm_gpu_get(gpu_id);
+
+    if (!gpu)
+        return 0;
+
+    if (current_value <= limit_value)
+        return 0;
+
+    uvm_down_read(&va_space->lock);
+    uvm_va_space_evict_size(va_space, gpu, current_value - limit_value);
+    uvm_up_read(&va_space->lock);
+
+    return 0;
+}
+
 size_t uvm_linux_api_get_gpu_rss(struct task_struct *task, int fd) {
-    struct file *filep = fget_task(task, fd);
+    struct file *filep = fget_task_local(task, fd);
     size_t max_rss = 0;
     uvm_gpu_id_t id;
     uvm_gpu_t *gpu;
@@ -231,7 +262,7 @@ out:
 EXPORT_SYMBOL_GPL(uvm_linux_api_get_gpu_rss);
 
 int uvm_linux_api_charge_gpu_memory_high(struct task_struct *task, int fd, u64 current_value, u64 high_value) {
-    struct file *filep = fget_task(task, fd);
+    struct file *filep = fget_task_local(task, fd);
     int error = 0;
     uvm_gpu_id_t id;
     uvm_gpu_t *gpu;
@@ -265,7 +296,7 @@ out:
 }
 EXPORT_SYMBOL_GPL(uvm_linux_api_charge_gpu_memory_high);
 
-int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, size_t size, bool uncharge) {
+int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, uvm_gpu_id_t gpu_id, size_t size, bool uncharge) {
     uvm_va_space_t *va_space;
     struct mm_struct *mm;
     struct task_struct *task;
@@ -276,6 +307,7 @@ int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, size_t size, bool un
     if (!va_space)
         return -EINVAL;
 
+#if defined(NV_LINUX_GPU_CGROUP)
     mm = va_space->va_space_mm.mm;
     if (!mm)
         return -EINVAL;
@@ -285,6 +317,9 @@ int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, size_t size, bool un
         return -EINVAL;
 
     return (uncharge) ? try_uncharge_gpu_memcg(task->active_gpucg, size) : try_charge_gpu_memcg(task->active_gpucg, size);
+#endif
+
+    return (uncharge) ? try_uncharge_gpu_memcg_debugfs(va_space, gpu_id, size) : try_charge_gpu_memcg_debugfs(va_space, gpu_id, size);
 }
 
 uvm_va_space_t *uvm_va_block_get_va_space_maybe_dead(uvm_va_block_t *va_block)
@@ -2263,8 +2298,13 @@ static NV_STATUS block_alloc_gpu_chunk(uvm_va_block_t *block,
     if (va_space && va_space->va_space_mm.mm)
         task = va_space->va_space_mm.mm->owner;
 
+#if defined(NV_LINUX_GPU_CGROUP)
     rss = task_get_gpu_memcg_current(task);
     gmemcghigh = task_get_gpu_memcg_high(task);
+#else
+    rss = get_gpu_memcg_current(va_space, gpu->id);
+    gmemcghigh = get_gpu_memcg_limit(va_space, gpu->id);
+#endif
 
     // First try getting a free chunk from previously-made allocations.
     gpu_chunk = block_retry_get_free_chunk(retry, gpu, size);
@@ -2307,7 +2347,7 @@ static NV_STATUS block_alloc_gpu_chunk(uvm_va_block_t *block,
     *out_gpu_chunk = gpu_chunk;
 out:
     if (status == NV_OK)
-        uvm_try_charge_gpu_memogy_cgroup(block, size, false);
+        uvm_try_charge_gpu_memogy_cgroup(block, gpu->id, size, false);
     return status;
 }
 

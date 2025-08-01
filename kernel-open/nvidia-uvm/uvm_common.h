@@ -57,6 +57,8 @@ enum {
 // NULL.
 void uvm_uuid_string(char *buffer, const NvProcessorUuid *uuid);
 
+struct file *fget_task_local(struct task_struct *task, unsigned int fd);
+
 // Long prefix - typically for debugging and tests.
 #define UVM_PRINT_FUNC_PREFIX(func, prefix, fmt, ...) \
     func(prefix "%s:%u %s[pid:%d]" fmt,               \

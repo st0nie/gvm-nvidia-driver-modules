@@ -6,6 +6,7 @@
 
 #include "uvm_types.h"
 #include "uvm_processors.h"
+#include "uvm_va_space.h"
 
 //
 // GVM Debugfs interface for GPU process control
@@ -57,4 +58,9 @@ int gvm_linux_api_preempt_task(struct task_struct *task, int fd);
 int gvm_linux_api_reschedule_task(struct task_struct *task, int fd);
 size_t gvm_linux_api_get_gpu_rss(struct task_struct *task, int fd);
 
+int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size);
+int try_uncharge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size);
+
+size_t get_gpu_memcg_current(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
+size_t get_gpu_memcg_limit(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
 #endif  // _GVM_DEBUGFS_H

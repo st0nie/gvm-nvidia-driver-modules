@@ -8,6 +8,7 @@
 
 #include "gvm_debugfs.h"
 #include "uvm_global.h"
+#include "uvm_va_block.h"
 #include "uvm_va_space.h"
 
 // Global debugfs root directory
@@ -655,4 +656,31 @@ static uvm_va_space_t *_gvm_find_va_space_by_pid(pid_t pid)
     uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
 
     return va_space;
+}
+
+int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size) {
+    UVM_ASSERT(va_space->gpu_cgroup);
+    va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current += size;
+    return 0;
+}
+
+int try_uncharge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size) {
+    UVM_ASSERT(va_space->gpu_cgroup);
+    if (va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current > size) {
+        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current -= size;
+    }
+    else {
+        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current = 0;
+    }
+    return 0;
+}
+
+size_t get_gpu_memcg_current(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
+    UVM_ASSERT(va_space->gpu_cgroup);
+    return va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current;
+}
+
+size_t get_gpu_memcg_limit(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
+    UVM_ASSERT(va_space->gpu_cgroup);
+    return va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_limit;
 }

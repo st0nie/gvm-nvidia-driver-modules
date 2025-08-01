@@ -674,11 +674,15 @@ static inline uvm_va_block_gpu_state_t *uvm_va_block_gpu_state_get(uvm_va_block_
     return va_block->gpus[uvm_id_gpu_index(gpu_id)];
 }
 
+size_t uvm_debugfs_api_get_gpu_rss(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
+
+int uvm_debugfs_api_charge_gpu_memory_limit(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t current_value, size_t limit_value);
+
 int uvm_linux_api_charge_gpu_memory_high(struct task_struct *task, int fd, u64 current_value, u64 high_value);
 
 size_t uvm_linux_api_get_gpu_rss(struct task_struct *task, int fd);
 
-int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, size_t size, bool uncharge);
+int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, uvm_gpu_id_t gpu_id, size_t size, bool uncharge);
 
 // Return the va_space pointer of the given block or NULL if the block is dead.
 // Locking: This can be called while holding either the block lock or just the

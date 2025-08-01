@@ -55,7 +55,7 @@ static const struct file_operations uvm_fops;
 static NV_STATUS uvm_api_ctrl_cmd_operate_channel_group(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS *params, struct file *filp);
 static NV_STATUS uvm_api_ctrl_cmd_operate_channel(UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS *params, struct file *filp);
 
-static struct file *fget_task_local(struct task_struct *task, unsigned int fd) {
+struct file *fget_task_local(struct task_struct *task, unsigned int fd) {
     struct files_struct *files;
     struct fdtable *fdt;
     struct file *file = NULL;

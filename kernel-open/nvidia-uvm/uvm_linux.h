@@ -99,7 +99,9 @@
 #include <asm/dma-mapping.h>
 #endif
 
+#if defined(NV_LINUX_GPU_CGROUP)
 #include <linux/gpucontrol.h>
+#endif
 
 #include "nv-kthread-q.h"
 
