@@ -7,9 +7,12 @@
 #include <linux/slab.h>
 
 #include "gvm_debugfs.h"
+#include "uvm_common.h"
 #include "uvm_global.h"
 #include "uvm_va_block.h"
-#include "uvm_va_space.h"
+
+int uvm_debugfs_api_preempt_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
+int uvm_debugfs_api_reschedule_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
 
 // Global debugfs root directory
 static struct dentry *gvm_debugfs_root;
@@ -57,7 +60,7 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
     uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
     char buf[32];
     size_t limit;
-    int parsed;
+    int error;
 
     if (!va_space)
         return -ENOENT;
@@ -70,9 +73,9 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
 
     buf[count] = '\0';
 
-    parsed = kstrtoul(buf, 10, (unsigned long *) &limit);
-    if (parsed != 0)
-        return -EINVAL;
+    error = kstrtoul(buf, 10, (unsigned long *) &limit);
+    if (error != 0)
+        return error;
 
     UVM_ASSERT(va_space->gpu_cgroup != NULL);
     va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit = limit;
@@ -119,9 +122,10 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
     uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
+    int gpu_id_index = uvm_id_gpu_index(gpu_debugfs->gpu_id);
     char buf[32];
     size_t max;
-    int parsed;
+    int error;
 
     if (!va_space)
         return -ENOENT;
@@ -134,12 +138,34 @@ static ssize_t gvm_process_compute_max_write(struct file *file, const char __use
 
     buf[count] = '\0';
 
-    parsed = kstrtoul(buf, 10, (unsigned long *) &max);
-    if (parsed != 0)
-        return -EINVAL;
+    error = kstrtoul(buf, 10, (unsigned long *) &max);
+    if (error != 0)
+        return error;
 
     UVM_ASSERT(va_space->gpu_cgroup != NULL);
-    va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_max = max;
+    va_space->gpu_cgroup[gpu_id_index].compute_max = max;
+
+    if (va_space->gpu_cgroup[gpu_id_index].compute_max < va_space->gpu_cgroup[gpu_id_index].compute_current) {
+        if (va_space->gpu_cgroup[gpu_id_index].compute_max == 0) {
+            va_space->gpu_cgroup[gpu_id_index].compute_current = 0;
+            error = uvm_debugfs_api_preempt_task(va_space, gpu_debugfs->gpu_id);
+            if (error != 0)
+                return error;
+        }
+        else {
+            // TODO: Set timeslice
+        }
+    }
+    else if (va_space->gpu_cgroup[gpu_id_index].compute_max > va_space->gpu_cgroup[gpu_id_index].compute_current) {
+        if (va_space->gpu_cgroup[gpu_id_index].compute_current == 0) {
+            // TODO: Set current value according to timeslice
+            va_space->gpu_cgroup[gpu_id_index].compute_current = 100;
+            error = uvm_debugfs_api_reschedule_task(va_space, gpu_debugfs->gpu_id);
+            if (error != 0)
+                return error;
+        }
+        // TODO: Set timeslice
+    }
 
     // TODO
     // Set timeslice or preempt

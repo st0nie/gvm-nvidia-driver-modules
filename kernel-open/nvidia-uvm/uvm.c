@@ -1162,6 +1162,112 @@ out:
 }
 EXPORT_SYMBOL_GPL(uvm_linux_api_reschedule_task);
 
+static NV_STATUS uvm_debugfs_api_ctrl_cmd_operate_channel_group(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS *params, uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
+    uvm_gpu_va_space_t *gpu_va_space;
+    uvm_user_channel_group_t *user_channel_group;
+    NV_STATUS status;
+
+    for_each_gpu_va_space(gpu_va_space, va_space) {
+        if (uvm_id_gpu_index(gpu_va_space->gpu->id) != uvm_id_gpu_index(gpu_id))
+            continue;
+
+        list_for_each_entry(user_channel_group, &gpu_va_space->registered_channel_groups, channel_group_node) {
+            status = nvUvmInterfaceCtrlCmdOperateChannelGroup(&user_channel_group->parent->uuid,
+                                                     user_channel_group->group_id,
+                                                     user_channel_group->runlist_id,
+                                                     params->cmd,
+                                                     &params->data,
+                                                     params->dataSize);
+            if (status != NV_OK) {
+                return status;
+            }
+        }
+    }
+
+    return NV_OK;
+}
+
+static NV_STATUS uvm_debugfs_api_ctrl_cmd_operate_channel(UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS *params, uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
+    uvm_gpu_va_space_t *gpu_va_space;
+    uvm_user_channel_t *user_channel;
+    NV_STATUS status;
+
+    for_each_gpu_va_space(gpu_va_space, va_space) {
+        if (uvm_id_gpu_index(gpu_va_space->gpu->id) != uvm_id_gpu_index(gpu_id))
+            continue;
+
+        list_for_each_entry(user_channel, &gpu_va_space->registered_channels, list_node) {
+            status = nvUvmInterfaceCtrlCmdOperateChannel(user_channel->rm_retained_channel,
+                                                     params->cmd,
+                                                     &params->data,
+                                                     params->dataSize);
+            if (status != NV_OK) {
+                return status;
+            }
+        }
+    }
+
+    return NV_OK;
+}
+
+int uvm_debugfs_api_preempt_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
+    UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS params = {
+        .cmd = NVA06F_CTRL_CMD_STOP_CHANNEL,
+        .data = {
+            .NVA06F_CTRL_STOP_CHANNEL_PARAMS = {
+                .bImmediate = true
+            }
+        },
+        .dataSize = sizeof(NVA06F_CTRL_STOP_CHANNEL_PARAMS),
+        .rmStatus = 0
+    };
+    int error = 0;
+
+    if (uvm_debugfs_api_ctrl_cmd_operate_channel(&params, va_space, gpu_id) != NV_OK)
+        error = -EINVAL;
+
+    return error;
+}
+
+int uvm_debugfs_api_reschedule_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
+    UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS bind_params = {
+        .cmd = NVA06F_CTRL_CMD_BIND,
+        .data = {
+            .NVA06F_CTRL_BIND_PARAMS = {
+                // Will be filled in kernel module using restored type of engine
+                .engineType = 0
+            }
+        },
+        .dataSize = sizeof(NVA06F_CTRL_BIND_PARAMS),
+        .rmStatus = 0
+    };
+    UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS schedule_params = {
+        .cmd = NVA06F_CTRL_CMD_GPFIFO_SCHEDULE,
+        .data = {
+            .NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS = {
+                .bEnable = true,
+                .bSkipSubmit = false,
+                .bSkipEnable = false
+            }
+        },
+        .dataSize = sizeof(NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS),
+        .rmStatus = 0
+    };
+    int error = 0;
+
+    if (uvm_debugfs_api_ctrl_cmd_operate_channel(&bind_params, va_space, gpu_id) != NV_OK) {
+        error = -EINVAL;
+        goto out;
+    }
+    if (uvm_debugfs_api_ctrl_cmd_operate_channel(&schedule_params, va_space, gpu_id) != NV_OK) {
+        error = -EINVAL;
+        goto out;
+    }
+
+out:
+    return error;
+}
+
 static NV_STATUS uvm_api_ctrl_cmd_operate_channel_group(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS *params, struct file *filp)
 {
     uvm_va_space_t *va_space = uvm_va_space_get(filp);
