@@ -24,7 +24,7 @@ static struct dentry *gvm_debugfs_processes_dir;
 static DEFINE_HASHTABLE(gvm_debugfs_dirs, GVM_DEBUGFS_HASH_BITS);
 static DEFINE_SPINLOCK(gvm_debugfs_lock);
 
-#define GVM_MAX_VM_SPACES 8
+#define GVM_MAX_VA_SPACES 8
 
 // Timeslice is calculated by GVM_MAX_TIMESLICE_US >> priority
 // In default, priority is 2, whose timeslice is 2048 us
@@ -65,14 +65,14 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
 {
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
-    uvm_va_space_t *va_spaces[GVM_MAX_VM_SPACES];
+    uvm_va_space_t *va_spaces[GVM_MAX_VA_SPACES];
     size_t va_space_index;
     size_t va_space_count;
     char buf[32];
     size_t limit;
     int error;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VM_SPACES);
+    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
 
     if (va_space_count == 0)
         return -ENOENT;
@@ -136,13 +136,13 @@ static ssize_t gvm_process_compute_priority_write(struct file *file, const char 
     struct seq_file *m = file->private_data;
     struct gvm_gpu_debugfs *gpu_debugfs = m->private;
     int error = 0;
-    uvm_va_space_t *va_spaces[GVM_MAX_VM_SPACES];
+    uvm_va_space_t *va_spaces[GVM_MAX_VA_SPACES];
     size_t va_space_index;
     size_t va_space_count;
     char buf[32];
     size_t priority;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VM_SPACES);
+    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
 
     if (va_space_count == 0)
         return -ENOENT;
@@ -170,6 +170,73 @@ static ssize_t gvm_process_compute_priority_write(struct file *file, const char 
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_priority = priority;
 
         if ((error = uvm_debugfs_api_set_timeslice(va_spaces[va_space_index], gpu_debugfs->gpu_id, GVM_MAX_TIMESLICE_US >> priority)) != 0)
+            break;
+    }
+
+
+out:
+    return error ? error : count;
+}
+
+// Show current compute freeze status for a specific process and GPU
+static int gvm_process_compute_freeze_show(struct seq_file *m, void *data)
+{
+    struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
+
+    if (!va_space)
+        return -ENOENT;
+
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_freeze);
+
+    return 0;
+}
+
+// Set compute freeze status and preempt/reschedule for a specific process and GPU
+static ssize_t gvm_process_compute_freeze_write(struct file *file, const char __user *user_buf,
+                                              size_t count, loff_t *ppos)
+{
+    struct seq_file *m = file->private_data;
+    struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    int error = 0;
+    uvm_va_space_t *va_spaces[GVM_MAX_VA_SPACES];
+    size_t va_space_index;
+    size_t va_space_count;
+    char buf[32];
+    size_t freeze;
+
+    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+
+    if (va_space_count == 0)
+        return -ENOENT;
+
+    if (count >= sizeof(buf))
+        return -EINVAL;
+
+    if (copy_from_user(buf, user_buf, count))
+        return -EFAULT;
+
+    buf[count] = '\0';
+
+    error = kstrtoul(buf, 10, (unsigned long *) &freeze);
+    if (error != 0)
+        return error;
+
+    if (freeze > 1) {
+        printk(KERN_INFO "freeze should be 0 or 1 but got %llu\n", freeze);
+        error = -EINVAL;
+        goto out;
+    }
+
+    for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
+        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_freeze = freeze;
+
+        error = (freeze) ? uvm_debugfs_api_preempt_task(va_spaces[va_space_index], gpu_debugfs->gpu_id) :
+            uvm_debugfs_api_reschedule_task(va_spaces[va_space_index], gpu_debugfs->gpu_id);
+
+        if (error)
             break;
     }
 
@@ -231,6 +298,19 @@ static const struct file_operations gvm_process_compute_priority_fops = {
     .open = gvm_process_compute_priority_open,
     .read = seq_read,
     .write = gvm_process_compute_priority_write,
+    .llseek = seq_lseek,
+    .release = single_release,
+};
+
+static int gvm_process_compute_freeze_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, gvm_process_compute_freeze_show, inode->i_private);
+}
+
+static const struct file_operations gvm_process_compute_freeze_fops = {
+    .open = gvm_process_compute_freeze_open,
+    .read = seq_read,
+    .write = gvm_process_compute_freeze_write,
     .llseek = seq_lseek,
     .release = single_release,
 };
@@ -436,6 +516,13 @@ int gvm_debugfs_create_gpu_dir(pid_t pid, uvm_gpu_id_t gpu_id)
     gpu_debugfs->compute_priority = debugfs_create_file("compute.priority", 0644, gpu_debugfs->gpu_dir,
                                                     gpu_debugfs, &gvm_process_compute_priority_fops);
     if (!gpu_debugfs->compute_priority) {
+        ret = -ENOMEM;
+        goto cleanup;
+    }
+
+    gpu_debugfs->compute_freeze = debugfs_create_file("compute.freeze", 0644, gpu_debugfs->gpu_dir,
+                                                    gpu_debugfs, &gvm_process_compute_freeze_fops);
+    if (!gpu_debugfs->compute_freeze) {
         ret = -ENOMEM;
         goto cleanup;
     }
