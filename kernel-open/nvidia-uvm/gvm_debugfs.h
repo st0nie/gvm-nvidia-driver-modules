@@ -24,6 +24,7 @@ struct gvm_gpu_debugfs {
     struct dentry *memory_priority;      // memory.priority file
     struct dentry *memory_recommend;  // memory.recommend file (read-only)
     struct dentry *memory_current;   // memory.current file (read-only)
+    struct dentry *memory_swap_current;   // memory.swap.current file (read-only)
     struct dentry *compute_priority;     // compute.priority file
     struct dentry *compute_freeze;       // compute.freeze file
     struct dentry *compute_current;  // compute.current file (read-only)
@@ -61,8 +62,8 @@ int gvm_linux_api_preempt_task(struct task_struct *task, int fd);
 int gvm_linux_api_reschedule_task(struct task_struct *task, int fd);
 size_t gvm_linux_api_get_gpu_rss(struct task_struct *task, int fd);
 
-int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size);
-int try_uncharge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size);
+int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size, bool swap);
+int try_uncharge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size, bool swap);
 
 size_t get_gpu_memcg_current(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
 size_t get_gpu_memcg_limit(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);

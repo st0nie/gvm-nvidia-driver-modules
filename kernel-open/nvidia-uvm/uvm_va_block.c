@@ -173,6 +173,7 @@ static NV_STATUS uvm_va_space_evict_size(uvm_va_space_t *va_space, uvm_gpu_t *gp
                         status = block_evict_pages_from_gpu(va_block, gpu, mm, false);
                         if (status == NV_OK) {
                             total_evicted_bytes += uvm_va_block_size(va_block);
+                            uvm_try_charge_gpu_memogy_cgroup(va_block, gpu->id, uvm_va_block_size(va_block), false, true);
                             if (uvm_va_block_gpu_state_get(va_block, gpu->id)) {
                                 block_destroy_gpu_state(va_block, uvm_va_space_block_context(va_space, NULL), gpu->id);
                             }
@@ -289,7 +290,7 @@ out:
 }
 EXPORT_SYMBOL_GPL(uvm_linux_api_charge_gpu_memory_high);
 
-int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, uvm_gpu_id_t gpu_id, size_t size, bool uncharge) {
+int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, uvm_gpu_id_t gpu_id, size_t size, bool uncharge, bool swap) {
     uvm_va_space_t *va_space;
     if (!block)
         return -EINVAL;
@@ -313,7 +314,8 @@ int uvm_try_charge_gpu_memogy_cgroup(uvm_va_block_t *block, uvm_gpu_id_t gpu_id,
     return (uncharge) ? try_uncharge_gpu_memcg(task->active_gpucg, size) : try_charge_gpu_memcg(task->active_gpucg, size);
 #endif
 
-    return (uncharge) ? try_uncharge_gpu_memcg_debugfs(va_space, gpu_id, size) : try_charge_gpu_memcg_debugfs(va_space, gpu_id, size);
+    return (uncharge) ? try_uncharge_gpu_memcg_debugfs(va_space, gpu_id, size, swap) :
+        try_charge_gpu_memcg_debugfs(va_space, gpu_id, size, swap);
 }
 
 uvm_va_space_t *uvm_va_block_get_va_space_maybe_dead(uvm_va_block_t *va_block)
@@ -2347,7 +2349,7 @@ static NV_STATUS block_alloc_gpu_chunk(uvm_va_block_t *block,
     *out_gpu_chunk = gpu_chunk;
 out:
     if (status == NV_OK)
-        uvm_try_charge_gpu_memogy_cgroup(block, gpu->id, size, false);
+        uvm_try_charge_gpu_memogy_cgroup(block, gpu->id, size, false, false);
     return status;
 }
 
@@ -4750,6 +4752,10 @@ static NV_STATUS block_copy_resident_pages_mask(uvm_va_block_t *block,
 
                 if (status != NV_OK)
                     break;
+            }
+            if (block_context->make_resident.cause == UVM_MAKE_RESIDENT_CAUSE_REPLAYABLE_FAULT) {
+                if (UVM_ID_IS_GPU(dst_id) && *copied_pages_out > 0)
+                    uvm_try_charge_gpu_memogy_cgroup(block, dst_id, *copied_pages_out * PAGE_SIZE, true, true);
             }
         }
         else {

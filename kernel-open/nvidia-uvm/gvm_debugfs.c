@@ -174,6 +174,21 @@ static int gvm_process_memory_current_show(struct seq_file *m, void *data)
     return 0;
 }
 
+// Show current swap memory usage for a specific process and GPU
+static int gvm_process_memory_swap_current_show(struct seq_file *m, void *data)
+{
+    struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
+
+    if (!va_space)
+        return -ENOENT;
+
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_swap_current);
+
+    return 0;
+}
+
 // Show recommend memory usage for a specific process and GPU
 static int gvm_process_memory_recommend_show(struct seq_file *m, void *data)
 {
@@ -187,6 +202,44 @@ static int gvm_process_memory_recommend_show(struct seq_file *m, void *data)
     seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_recommend);
 
     return 0;
+}
+
+// Set memory recommend for a specific process and GPU
+static ssize_t gvm_process_memory_recommend_write(struct file *file, const char __user *user_buf,
+                                             size_t count, loff_t *ppos)
+{
+    struct seq_file *m = file->private_data;
+    struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_spaces[GVM_MAX_VA_SPACES];
+    size_t va_space_index;
+    size_t va_space_count;
+    char buf[32];
+    size_t recommend;
+    int error;
+
+    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+
+    if (va_space_count == 0)
+        return -ENOENT;
+
+    if (count >= sizeof(buf))
+        return -EINVAL;
+
+    if (copy_from_user(buf, user_buf, count))
+        return -EFAULT;
+
+    buf[count] = '\0';
+
+    error = kstrtoul(buf, 10, (unsigned long *) &recommend);
+    if (error != 0)
+        return error;
+
+    for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
+        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_recommend = recommend;
+    }
+
+    return count;
 }
 
 // Show current compute timeslice for a specific process and GPU
@@ -377,6 +430,18 @@ static const struct file_operations gvm_process_memory_current_fops = {
     .release = single_release,
 };
 
+static int gvm_process_memory_swap_current_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, gvm_process_memory_swap_current_show, inode->i_private);
+}
+
+static const struct file_operations gvm_process_memory_swap_current_fops = {
+    .open = gvm_process_memory_swap_current_open,
+    .read = seq_read,
+    .llseek = seq_lseek,
+    .release = single_release,
+};
+
 static int gvm_process_memory_recommend_open(struct inode *inode, struct file *file)
 {
     return single_open(file, gvm_process_memory_recommend_show, inode->i_private);
@@ -385,6 +450,7 @@ static int gvm_process_memory_recommend_open(struct inode *inode, struct file *f
 static const struct file_operations gvm_process_memory_recommend_fops = {
     .open = gvm_process_memory_recommend_open,
     .read = seq_read,
+    .write = gvm_process_memory_recommend_write,
     .llseek = seq_lseek,
     .release = single_release,
 };
@@ -581,10 +647,11 @@ int gvm_debugfs_create_gpu_dir(pid_t pid, uvm_gpu_id_t gpu_id)
 
     if (va_space) {
         UVM_ASSERT(va_space->gpu_cgroup != NULL);
-        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current = 0;
+        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_limit = -1ULL;
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_priority = 0;
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_recommend = -1ULL;
-        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_limit = -1ULL;
+        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current = 0;
+        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current = 0;
 
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_priority = 2;
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_freeze = 0;
@@ -627,8 +694,16 @@ int gvm_debugfs_create_gpu_dir(pid_t pid, uvm_gpu_id_t gpu_id)
         goto cleanup;
     }
 
+    gpu_debugfs->memory_swap_current =
+        debugfs_create_file("memory.swap.current", 0444, gpu_debugfs->gpu_dir, gpu_debugfs,
+                            &gvm_process_memory_swap_current_fops);
+    if (!gpu_debugfs->memory_swap_current) {
+        ret = -ENOMEM;
+        goto cleanup;
+    }
+
     gpu_debugfs->memory_recommend =
-        debugfs_create_file("memory.recommend", 0444, gpu_debugfs->gpu_dir, gpu_debugfs,
+        debugfs_create_file("memory.recommend", 0644, gpu_debugfs->gpu_dir, gpu_debugfs,
                             &gvm_process_memory_recommend_fops);
     if (!gpu_debugfs->memory_recommend) {
         ret = -ENOMEM;
@@ -924,19 +999,23 @@ static size_t _gvm_find_va_spaces_by_pid(pid_t pid, uvm_va_space_t **va_spaces, 
     return count;
 }
 
-int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size) {
+int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size, bool swap) {
     UVM_ASSERT(va_space->gpu_cgroup);
-    va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current += size;
+    size_t *memcg_current = (swap) ? &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current) :
+        &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current);
+    *memcg_current += size;
     return 0;
 }
 
-int try_uncharge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size) {
+int try_uncharge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size, bool swap) {
     UVM_ASSERT(va_space->gpu_cgroup);
-    if (va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current > size) {
-        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current -= size;
+    size_t *memcg_current = (swap) ? &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current) :
+        &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current);
+    if (*memcg_current > size) {
+        *memcg_current -= size;
     }
     else {
-        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current = 0;
+        *memcg_current = 0;
     }
     return 0;
 }
@@ -1020,6 +1099,7 @@ void calculate_gpu_memcg_recommend_all(uvm_gpu_id_t gpu_id) {
             all_count += 1;
             if (va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_priority == 0) {
                 memory_requirement += va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current;
+                memory_requirement += va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current;
             } else {
                 low_priority_pids[low_priority_count] = va_space->pid;
                 low_priority_count += 1;
@@ -1028,7 +1108,7 @@ void calculate_gpu_memcg_recommend_all(uvm_gpu_id_t gpu_id) {
     }
     uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
 
-    memory_remain = (memory_requirement >= memory_total) ? 1048576LL * 1024 * 8 : memory_total - memory_requirement;
+    memory_remain = (memory_requirement + 1048576LL * 1024 * 2 >= memory_total) ? 1048576LL * 1024 * 8 : memory_total - memory_requirement - 1048576LL * 1024 * 2;
 
     uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
     list_for_each_entry(va_space, &g_uvm_global.va_spaces.list, list_node) {
@@ -1071,7 +1151,8 @@ void signal_gpu_memcg_current_over_recommend_all(uvm_gpu_id_t gpu_id) {
         }
 
         if (!found) {
-            if (va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current > va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_recommend) {
+            if (va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current >
+                    va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_recommend) {
                 if (ts.tv_sec > va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].signal_tv_sec + GVM_SIGNAL_INTERVAL_SEC) {
                     va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].signal_tv_sec = ts.tv_sec;
                     pids[count] = va_space->pid;

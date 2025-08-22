@@ -147,6 +147,7 @@ struct uvm_gpu_cgroup_struct
     size_t memory_priority;
     size_t memory_recommend;
     size_t memory_current;
+    size_t memory_swap_current;
 
     size_t compute_priority;
     size_t compute_freeze;
