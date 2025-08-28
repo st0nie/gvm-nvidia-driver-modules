@@ -14,6 +14,7 @@
 int uvm_debugfs_api_preempt_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
 int uvm_debugfs_api_reschedule_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id);
 int uvm_debugfs_api_set_timeslice(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t timeslice);
+int uvm_debugfs_api_make_realtime(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, NvBool realtime);
 
 // Global debugfs root directory
 static struct dentry *gvm_debugfs_root;
@@ -374,6 +375,72 @@ out:
     return error ? error : count;
 }
 
+// Show current compute realtime status for a specific process and GPU
+static int gvm_process_compute_realtime_show(struct seq_file *m, void *data)
+{
+    struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    uvm_va_space_t *va_space = _gvm_find_va_space_by_pid(gpu_debugfs->pid);
+
+    if (!va_space)
+        return -ENOENT;
+
+    UVM_ASSERT(va_space->gpu_cgroup != NULL);
+    seq_printf(m, "%zu\n", va_space->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_realtime);
+
+    return 0;
+}
+
+// Set compute realtime status and preempt/reschedule for a specific process and GPU
+static ssize_t gvm_process_compute_realtime_write(struct file *file, const char __user *user_buf,
+                                              size_t count, loff_t *ppos)
+{
+    struct seq_file *m = file->private_data;
+    struct gvm_gpu_debugfs *gpu_debugfs = m->private;
+    int error = 0;
+    uvm_va_space_t *va_spaces[GVM_MAX_VA_SPACES];
+    size_t va_space_index;
+    size_t va_space_count;
+    char buf[32];
+    size_t realtime;
+
+    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+
+    if (va_space_count == 0)
+        return -ENOENT;
+
+    if (count >= sizeof(buf))
+        return -EINVAL;
+
+    if (copy_from_user(buf, user_buf, count))
+        return -EFAULT;
+
+    buf[count] = '\0';
+
+    error = kstrtoul(buf, 10, (unsigned long *) &realtime);
+    if (error != 0)
+        return error;
+
+    if (realtime > 1) {
+        printk(KERN_INFO "realtime should be 0 or 1 but got %llu\n", realtime);
+        error = -EINVAL;
+        goto out;
+    }
+
+    for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
+        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_realtime = realtime;
+
+        error = uvm_debugfs_api_make_realtime(va_spaces[va_space_index], gpu_debugfs->gpu_id, realtime);
+
+        if (error)
+            break;
+    }
+
+
+out:
+    return error ? error : count;
+}
+
 // Reschedule a specific process on a specific GPU
 static int gvm_process_compute_current_show(struct seq_file *m, void *data)
 {
@@ -478,6 +545,19 @@ static const struct file_operations gvm_process_compute_freeze_fops = {
     .open = gvm_process_compute_freeze_open,
     .read = seq_read,
     .write = gvm_process_compute_freeze_write,
+    .llseek = seq_lseek,
+    .release = single_release,
+};
+
+static int gvm_process_compute_realtime_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, gvm_process_compute_realtime_show, inode->i_private);
+}
+
+static const struct file_operations gvm_process_compute_realtime_fops = {
+    .open = gvm_process_compute_realtime_open,
+    .read = seq_read,
+    .write = gvm_process_compute_realtime_write,
     .llseek = seq_lseek,
     .release = single_release,
 };
@@ -656,6 +736,7 @@ int gvm_debugfs_create_gpu_dir(pid_t pid, uvm_gpu_id_t gpu_id)
 
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_priority = GVM_MIN_PRIORITY / 2;
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_freeze = 0;
+        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_realtime = 0;
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_current = 100;
     }
 
@@ -721,6 +802,13 @@ int gvm_debugfs_create_gpu_dir(pid_t pid, uvm_gpu_id_t gpu_id)
     gpu_debugfs->compute_freeze = debugfs_create_file("compute.freeze", 0644, gpu_debugfs->gpu_dir,
                                                     gpu_debugfs, &gvm_process_compute_freeze_fops);
     if (!gpu_debugfs->compute_freeze) {
+        ret = -ENOMEM;
+        goto cleanup;
+    }
+
+    gpu_debugfs->compute_realtime = debugfs_create_file("compute.realtime", 0644, gpu_debugfs->gpu_dir,
+                                                    gpu_debugfs, &gvm_process_compute_realtime_fops);
+    if (!gpu_debugfs->compute_realtime) {
         ret = -ENOMEM;
         goto cleanup;
     }

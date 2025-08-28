@@ -1287,6 +1287,25 @@ int uvm_debugfs_api_set_timeslice(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id,
     return error;
 }
 
+int uvm_debugfs_api_make_realtime(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, NvBool realtime) {
+    UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS params = {
+        .cmd = NVA06C_CTRL_CMD_MAKE_REALTIME,
+        .data = {
+            .NVA06C_CTRL_MAKE_REALTIME_PARAMS = {
+                .bRealtime = realtime
+            }
+        },
+        .dataSize = sizeof(NVA06C_CTRL_MAKE_REALTIME_PARAMS),
+        .rmStatus = 0
+    };
+    int error = 0;
+
+    if (uvm_debugfs_api_ctrl_cmd_operate_channel_group(&params, va_space, gpu_id) != NV_OK)
+        error = -EINVAL;
+
+    return error;
+}
+
 static NV_STATUS uvm_api_ctrl_cmd_operate_channel_group(UVM_CTRL_CMD_OPERATE_CHANNEL_GROUP_PARAMS *params, struct file *filp)
 {
     uvm_va_space_t *va_space = uvm_va_space_get(filp);

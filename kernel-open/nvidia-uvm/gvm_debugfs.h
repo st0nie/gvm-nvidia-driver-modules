@@ -27,6 +27,7 @@ struct gvm_gpu_debugfs {
     struct dentry *memory_swap_current;   // memory.swap.current file (read-only)
     struct dentry *compute_priority;     // compute.priority file
     struct dentry *compute_freeze;       // compute.freeze file
+    struct dentry *compute_realtime;     // compute.realtime file
     struct dentry *compute_current;  // compute.current file (read-only)
     pid_t pid;                       // Process ID
     uvm_gpu_id_t gpu_id;                      // GPU ID

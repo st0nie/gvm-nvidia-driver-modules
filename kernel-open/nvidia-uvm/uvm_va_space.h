@@ -151,6 +151,7 @@ struct uvm_gpu_cgroup_struct
 
     size_t compute_priority;
     size_t compute_freeze;
+    size_t compute_realtime;
     size_t compute_current;
 
     __s64 signal_tv_sec;
