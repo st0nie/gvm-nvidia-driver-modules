@@ -37,6 +37,7 @@
 
 #include <linux/pid.h>
 #include <linux/pid_namespace.h>
+#include <linux/kallsyms.h>
 #if defined(CONFIG_LOCKDEP)
 #include <linux/lockdep.h>
 #endif // CONFIG_LOCKDEP
@@ -1280,6 +1281,10 @@ NvBool NV_API_CALL os_is_efi_enabled(void)
 void NV_API_CALL os_dump_stack(void)
 {
     dump_stack();
+}
+
+void NV_API_CALL os_sprint_symbol(char *buf, unsigned long addr) {
+    sprint_symbol(buf, addr);
 }
 
 typedef struct os_spinlock_s

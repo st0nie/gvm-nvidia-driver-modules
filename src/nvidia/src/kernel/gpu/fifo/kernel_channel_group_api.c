@@ -1394,6 +1394,8 @@ kchangrpapiCtrlCmdSetInterleaveLevel_IMPL
                   pResourceRef->externalClassId);
     }
     NV_ASSERT_OR_RETURN((pClass != NULL), NV_ERR_NOT_SUPPORTED);
+        
+    NV_PRINTF(LEVEL_ERROR, "kchangrpapiCtrlCmdSetInterleaveLevel_IMPL try set interleave level\n");
 
     if (IS_VIRTUAL(pGpu) || IS_GSP_CLIENT(pGpu))
     {
@@ -1409,6 +1411,7 @@ kchangrpapiCtrlCmdSetInterleaveLevel_IMPL
                           pRmCtrlParams->pParams,
                           pRmCtrlParams->paramsSize,
                           status);
+        NV_PRINTF(LEVEL_ERROR, "kchangrpapiCtrlCmdSetInterleaveLevel_IMPL set interleave level\n");
         NV_CHECK_OR_RETURN(LEVEL_INFO, status == NV_OK, NV_ERR_NOT_SUPPORTED);
     }
 

@@ -11372,6 +11372,7 @@ NV_STATUS nvGpuOpsCtrlCmdOperateChannelGroup(NvProcessorUuid *uuid,
     NvU32 rmapiStartTimeUSec;
     NvU32 rmapiEndTimeSec;
     NvU32 rmapiEndTimeUSec;
+    char buf[100];
 
     pGpu = gpumgrGetGpuFromUuid(uuid->uuid,
         DRF_DEF(2080_GPU_CMD, _GPU_GET_GID_FLAGS, _TYPE, _SHA1) |
@@ -11436,8 +11437,10 @@ NV_STATUS nvGpuOpsCtrlCmdOperateChannelGroup(NvProcessorUuid *uuid,
                         pParams,
                         dataSize));
     os_get_current_time(&rmapiEndTimeSec, &rmapiEndTimeUSec);
-    if (cmd == NVA06C_CTRL_CMD_SET_TIMESLICE || cmd == NVA06C_CTRL_CMD_PREEMPT) {
-        NV_PRINTF(LEVEL_ERROR, "%s: cmd 0x%x spent %d us\n", __FUNCTION__, cmd, (rmapiEndTimeSec * 1000000 + rmapiEndTimeUSec) - (rmapiStartTimeSec * 1000000 + rmapiStartTimeUSec));
+    if (cmd == NVA06C_CTRL_CMD_SET_TIMESLICE || cmd == NVA06C_CTRL_CMD_PREEMPT || cmd == NVA06C_CTRL_CMD_SET_INTERLEAVE_LEVEL) {
+        NV_PRINTF(LEVEL_ERROR, "%s: cmd 0x%x spent %d us in 0x%llx\n", __FUNCTION__, cmd, (rmapiEndTimeSec * 1000000 + rmapiEndTimeUSec) - (rmapiStartTimeSec * 1000000 + rmapiStartTimeUSec), pRmApi->Control);
+        os_sprint_symbol(buf, (unsigned long)pRmApi->Control);
+        NV_PRINTF(LEVEL_ERROR, "whose function name is %s\n", buf);
     }
 
     _nvGpuOpsLocksRelease(&acquiredLocks);

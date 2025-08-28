@@ -679,6 +679,9 @@ static NV_STATUS _gpuRmApiControl
 
     OBJGPU *pGpu = (OBJGPU*)pRmApi->pPrivateContext;
 
+    NV_PRINTF(LEVEL_ERROR, "Call with function 0x%llx\n", _gpuRmApiControl);
+    nv_printf(LEVEL_ERROR, "Call with function 0x%llx\n", _gpuRmApiControl);
+
     // This API is only used to route locally on monolithic or UCODE
     NV_ASSERT_OR_RETURN(!IS_GSP_CLIENT(pGpu), NV_ERR_INVALID_STATE);
 
@@ -695,6 +698,9 @@ static NV_STATUS _gpuRmApiControl
     //
     if (!IS_VIRTUAL(pGpu) && hClient == pGpu->hInternalClient && hObject == pGpu->hInternalSubdevice)
     {
+        if (cmd == NVA06C_CTRL_CMD_SET_INTERLEAVE_LEVEL) {
+            NV_PRINTF(LEVEL_ERROR, "Call with pentry\n");
+        }
         NV_ASSERT_OR_RETURN(pGpu->pCachedSubdevice && pGpu->pCachedRsClient, NV_ERR_INVALID_STATE);
 
         const struct NVOC_EXPORTED_METHOD_DEF *pEntry;
@@ -744,6 +750,9 @@ static NV_STATUS _gpuRmApiControl
     }
     else
     {
+        if (cmd == NVA06C_CTRL_CMD_SET_INTERLEAVE_LEVEL) {
+            NV_PRINTF(LEVEL_ERROR, "Call with pInternalRmApi\n");
+        }
         RM_API *pInternalRmApi = rmapiGetInterface(RMAPI_GPU_LOCK_INTERNAL);
         NV_ASSERT_OR_RETURN(rmDeviceGpuLockIsOwner(pGpu->gpuInstance),
             NV_ERR_INVALID_LOCK_STATE);
