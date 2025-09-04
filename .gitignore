@@ -5,6 +5,7 @@
 _out/
 
 
-# GVM dev
-**/.cache
-**/compile_commands.json
+**/.cache/
+**/.claude/
+compile_commands.json
+**/.clang-format
