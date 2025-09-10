@@ -1539,11 +1539,34 @@ static uvm_gpu_root_chunk_t *pick_root_chunk_to_evict(uvm_pmm_gpu_t *pmm, pid_t 
     return NULL;
 }
 
+static void free_root_chunk_lazy(uvm_gpu_root_chunk_t *root_chunk)
+{
+    uvm_gpu_chunk_t *chunk = &root_chunk->chunk;
+    uvm_gpu_t *gpu = uvm_gpu_chunk_get_gpu(chunk);
+
+    // We should be calling free_chunk() except that it acquires a mutex and
+    // we may be in an interrupt context where we can't do that. Instead,
+    // do a lazy free. Note that we have to use a "normal" spin lock because
+    // the UVM context is not available.
+    spin_lock(&gpu->pmm.list_lock.lock);
+
+    UVM_ASSERT(chunk->is_referenced);
+    chunk->is_referenced = false;
+    list_add_tail(&chunk->list, &gpu->pmm.root_chunks.va_block_lazy_free);
+
+    spin_unlock(&gpu->pmm.list_lock.lock);
+
+    nv_kthread_q_schedule_q_item(&gpu->parent->lazy_free_q,
+                                 &gpu->pmm.root_chunks.va_block_lazy_free_q_item);
+}
+
+
 static NV_STATUS pick_and_evict_root_chunk(uvm_pmm_gpu_t *pmm,
                                            uvm_pmm_gpu_memory_type_t type,
                                            uvm_pmm_context_t pmm_context,
                                            pid_t pid,
                                            uvm_pmm_alloc_flags_t flags,
+                                           NvBool sync,
                                            uvm_gpu_chunk_t **out_chunk)
 {
     uvm_gpu_t *gpu = uvm_pmm_to_gpu(pmm);
@@ -1606,13 +1629,23 @@ static NV_STATUS pick_and_evict_root_chunk(uvm_pmm_gpu_t *pmm,
             uvm_spin_unlock(&pmm->list_lock);
         }
 
-        if (memory_current <= memory_limit || !(flags & UVM_PMM_ALLOC_FLAGS_EVICT_FORCE))
+        if (memory_current <= memory_limit || !(flags & UVM_PMM_ALLOC_FLAGS_EVICT_FORCE)) {
+            if (!sync) {
+                free_root_chunk_lazy(root_chunk);
+            }
             break;
+        }
 
-        free_root_chunk(pmm, root_chunk, free_root_chunk_mode_from_pmm_context(pmm_context));
+        if (!sync) {
+            free_root_chunk_lazy(root_chunk);
+        } else {
+            free_root_chunk(pmm, root_chunk, free_root_chunk_mode_from_pmm_context(pmm_context));
+        }
     };
 
-    *out_chunk = chunk;
+    if (sync) {
+        *out_chunk = chunk;
+    }
     return NV_OK;
 }
 
@@ -1621,6 +1654,7 @@ static NV_STATUS pick_and_evict_root_chunk_retry(uvm_pmm_gpu_t *pmm,
                                                  uvm_pmm_context_t pmm_context,
                                                  pid_t pid,
                                                  uvm_pmm_alloc_flags_t flags,
+                                                 NvBool sync,
                                                  uvm_gpu_chunk_t **out_chunk)
 {
     NV_STATUS status;
@@ -1628,7 +1662,7 @@ static NV_STATUS pick_and_evict_root_chunk_retry(uvm_pmm_gpu_t *pmm,
     // Eviction can fail if the chunk gets selected for PMA eviction at
     // the same time. Keep retrying.
     do {
-        status = pick_and_evict_root_chunk(pmm, type, pmm_context, pid, flags, out_chunk);
+        status = pick_and_evict_root_chunk(pmm, type, pmm_context, pid, flags, sync, out_chunk);
     } while (status == NV_ERR_IN_USE);
 
     return status;
@@ -1728,12 +1762,14 @@ static NV_STATUS alloc_or_evict_root_chunk(uvm_pmm_gpu_t *pmm,
     NV_STATUS status;
     uvm_gpu_chunk_t *chunk;
 
-    status = (flags & UVM_PMM_ALLOC_FLAGS_EVICT_FORCE) ? NV_ERR_NO_MEMORY : alloc_root_chunk(pmm, type, flags, &chunk);
-    if (status != NV_OK) {
-        if ((flags & UVM_PMM_ALLOC_FLAGS_EVICT) && uvm_parent_gpu_supports_eviction(gpu->parent))
-            status = pick_and_evict_root_chunk_retry(pmm, type, PMM_CONTEXT_DEFAULT, pid, flags, chunk_out);
-
-        return status;
+    status = alloc_root_chunk(pmm, type, flags, &chunk);
+    if ((flags & UVM_PMM_ALLOC_FLAGS_EVICT) && uvm_parent_gpu_supports_eviction(gpu->parent)) {
+        if (status != NV_OK) {
+            status = pick_and_evict_root_chunk_retry(pmm, type, PMM_CONTEXT_DEFAULT, pid, flags, true, chunk_out);
+            return status;
+        } else if (flags & UVM_PMM_ALLOC_FLAGS_EVICT_FORCE) {
+            status = pick_and_evict_root_chunk_retry(pmm, type, PMM_CONTEXT_DEFAULT, pid, flags, false, chunk_out);
+        }
     }
 
     *chunk_out = chunk;
@@ -1751,15 +1787,17 @@ static NV_STATUS alloc_or_evict_root_chunk_unlocked(uvm_pmm_gpu_t *pmm,
     NV_STATUS status;
     uvm_gpu_chunk_t *chunk;
 
-    status = (flags & UVM_PMM_ALLOC_FLAGS_EVICT_FORCE) ? NV_ERR_NO_MEMORY : alloc_root_chunk(pmm, type, flags, &chunk);
-    if (status != NV_OK) {
-        if ((flags & UVM_PMM_ALLOC_FLAGS_EVICT) && uvm_parent_gpu_supports_eviction(gpu->parent)) {
-            uvm_mutex_lock(&pmm->lock);
-            status = pick_and_evict_root_chunk_retry(pmm, type, PMM_CONTEXT_DEFAULT, pid, flags, chunk_out);
+    status = alloc_root_chunk(pmm, type, flags, &chunk);
+    if ((flags & UVM_PMM_ALLOC_FLAGS_EVICT) && uvm_parent_gpu_supports_eviction(gpu->parent)) {
+        uvm_mutex_lock(&pmm->lock);
+        if (status != NV_OK) {
+            status = pick_and_evict_root_chunk_retry(pmm, type, PMM_CONTEXT_DEFAULT, pid, flags, true, chunk_out);
             uvm_mutex_unlock(&pmm->lock);
+            return status;
+        } else if (flags & UVM_PMM_ALLOC_FLAGS_EVICT_FORCE) {
+            status = pick_and_evict_root_chunk_retry(pmm, type, PMM_CONTEXT_DEFAULT, pid, flags, false, chunk_out);
         }
-
-        return status;
+        uvm_mutex_unlock(&pmm->lock);
     }
 
     *chunk_out = chunk;
@@ -2586,6 +2624,7 @@ static NV_STATUS uvm_pmm_gpu_pma_evict_pages(void *void_pmm,
                                                      PMM_CONTEXT_PMA_EVICTION,
                                                      0,
                                                      0,
+                                                     true,
                                                      &chunk);
         }
         uvm_mutex_unlock(&pmm->lock);
