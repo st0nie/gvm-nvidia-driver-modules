@@ -1219,36 +1219,41 @@ static NV_STATUS uvm_debugfs_api_ctrl_cmd_operate_gr_channel(UVM_CTRL_CMD_OPERAT
 }
 
 int uvm_debugfs_api_preempt_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
-    UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS params = {
-        .cmd = NVA06F_CTRL_CMD_STOP_CHANNEL,
+    UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS schedule_params = {
+        .cmd = NVA06F_CTRL_CMD_GPFIFO_SCHEDULE,
         .data = {
-            .NVA06F_CTRL_STOP_CHANNEL_PARAMS = {
-                .bImmediate = true
+            .NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS = {
+                .bEnable = false,
+                .bSkipSubmit = false,
+                .bSkipEnable = false
             }
         },
-        .dataSize = sizeof(NVA06F_CTRL_STOP_CHANNEL_PARAMS),
+        .dataSize = sizeof(NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS),
         .rmStatus = 0
     };
     int error = 0;
 
-    if (uvm_debugfs_api_ctrl_cmd_operate_gr_channel(&params, va_space, gpu_id) != NV_OK)
+    if (uvm_debugfs_api_ctrl_cmd_operate_gr_channel(&schedule_params, va_space, gpu_id) != NV_OK) {
         error = -EINVAL;
+        goto out;
+    }
 
+out:
     return error;
 }
 
 int uvm_debugfs_api_reschedule_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
-    UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS bind_params = {
-        .cmd = NVA06F_CTRL_CMD_BIND,
-        .data = {
-            .NVA06F_CTRL_BIND_PARAMS = {
-                // Will be filled in kernel module using restored type of engine
-                .engineType = 0
-            }
-        },
-        .dataSize = sizeof(NVA06F_CTRL_BIND_PARAMS),
-        .rmStatus = 0
-    };
+    // UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS bind_params = {
+    //     .cmd = NVA06F_CTRL_CMD_BIND,
+    //     .data = {
+    //         .NVA06F_CTRL_BIND_PARAMS = {
+    //             // Will be filled in kernel module using restored type of engine
+    //             .engineType = 0
+    //         }
+    //     },
+    //     .dataSize = sizeof(NVA06F_CTRL_BIND_PARAMS),
+    //     .rmStatus = 0
+    // };
     UVM_CTRL_CMD_OPERATE_CHANNEL_PARAMS schedule_params = {
         .cmd = NVA06F_CTRL_CMD_GPFIFO_SCHEDULE,
         .data = {
@@ -1263,10 +1268,10 @@ int uvm_debugfs_api_reschedule_task(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_i
     };
     int error = 0;
 
-    if (uvm_debugfs_api_ctrl_cmd_operate_gr_channel(&bind_params, va_space, gpu_id) != NV_OK) {
-        error = -EINVAL;
-        goto out;
-    }
+    // if (uvm_debugfs_api_ctrl_cmd_operate_gr_channel(&bind_params, va_space, gpu_id) != NV_OK) {
+    //     error = -EINVAL;
+    //     goto out;
+    // }
     if (uvm_debugfs_api_ctrl_cmd_operate_gr_channel(&schedule_params, va_space, gpu_id) != NV_OK) {
         error = -EINVAL;
         goto out;
