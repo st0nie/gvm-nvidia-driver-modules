@@ -236,7 +236,18 @@ typedef struct uvm_gpu_chunks_used_by_pid_struct
     struct list_head gpu_chunks;
 } uvm_gpu_chunks_used_by_pid_t;
 
-static uvm_gpu_chunks_used_by_pid_t *find_gpu_chunks_used_by_pid(struct list_head *list, pid_t pid) {
+static void gpu_chunks_used_by_pid_del_empty(struct list_head *list) {
+    uvm_gpu_chunks_used_by_pid_t *gpu_chunks_used_by_pid, *tmp;
+
+    list_for_each_entry_safe(gpu_chunks_used_by_pid, tmp, list, node) {
+        if (list_empty(&gpu_chunks_used_by_pid->gpu_chunks)) {
+            list_del(&gpu_chunks_used_by_pid->node);
+            uvm_kvfree(gpu_chunks_used_by_pid);
+        }
+    }
+}
+
+static uvm_gpu_chunks_used_by_pid_t *gpu_chunks_used_by_pid_find(struct list_head *list, pid_t pid) {
     uvm_gpu_chunks_used_by_pid_t *gpu_chunks_used_by_pid;
 
     list_for_each_entry(gpu_chunks_used_by_pid, list, node) {
@@ -249,7 +260,9 @@ static uvm_gpu_chunks_used_by_pid_t *find_gpu_chunks_used_by_pid(struct list_hea
 }
 
 static void gpu_chunks_used_by_pid_move_tail(struct list_head *gpu_chunk_node, struct list_head *list, pid_t pid) {
-    uvm_gpu_chunks_used_by_pid_t *gpu_chunks_used_by_pid = find_gpu_chunks_used_by_pid(list, pid);
+    gpu_chunks_used_by_pid_del_empty(list);
+
+    uvm_gpu_chunks_used_by_pid_t *gpu_chunks_used_by_pid = gpu_chunks_used_by_pid_find(list, pid);
 
     if (!gpu_chunks_used_by_pid) {
         gpu_chunks_used_by_pid = uvm_kvmalloc(sizeof(uvm_gpu_chunks_used_by_pid_t));
@@ -1567,7 +1580,7 @@ static uvm_gpu_root_chunk_t *pick_root_chunk_to_evict(uvm_pmm_gpu_t *pmm, pid_t 
         // TODO: Bug 1765193: Move the chunks to the tail of the used list whenever
         // they get mapped.
         if (!chunk) {
-            gpu_chunks_used_by_pid = find_gpu_chunks_used_by_pid(&pmm->root_chunks.va_block_used, pid);
+            gpu_chunks_used_by_pid = gpu_chunks_used_by_pid_find(&pmm->root_chunks.va_block_used, pid);
             if (gpu_chunks_used_by_pid)
                 chunk = list_first_chunk(&gpu_chunks_used_by_pid->gpu_chunks);
         }
