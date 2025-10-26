@@ -707,11 +707,13 @@ static void chunk_update_lists_locked(uvm_pmm_gpu_t *pmm, uvm_gpu_chunk_t *chunk
             UVM_ASSERT(root_chunk->chunk.state == UVM_PMM_GPU_CHUNK_STATE_IS_SPLIT ||
                        root_chunk->chunk.state == UVM_PMM_GPU_CHUNK_STATE_TEMP_PINNED);
             list_del_init(&root_chunk->chunk.list);
+            list_del_init(&root_chunk->chunk.list_global);
         }
         else if (root_chunk->chunk.state != UVM_PMM_GPU_CHUNK_STATE_FREE) {
             UVM_ASSERT(root_chunk->chunk.state == UVM_PMM_GPU_CHUNK_STATE_IS_SPLIT ||
                        root_chunk->chunk.state == UVM_PMM_GPU_CHUNK_STATE_ALLOCATED);
             gpu_chunks_used_by_pid_move_tail(&root_chunk->chunk.list, &pmm->root_chunks.va_block_used, get_pid_from_chunk(chunk));
+            list_move_tail(&root_chunk->chunk.list_global, &pmm->root_chunks.va_block_used_global);
         }
     }
 
@@ -731,6 +733,7 @@ static void gpu_unpin_temp(uvm_pmm_gpu_t *pmm,
     UVM_ASSERT(uvm_gpu_chunk_is_user(chunk));
 
     INIT_LIST_HEAD(&chunk->list);
+    INIT_LIST_HEAD(&chunk->list_global);
 
     uvm_spin_lock(&pmm->list_lock);
 
@@ -1231,6 +1234,11 @@ static uvm_gpu_chunk_t *list_first_chunk(struct list_head *list)
     return list_first_entry_or_null(list, uvm_gpu_chunk_t, list);
 }
 
+static uvm_gpu_chunk_t *list_first_chunk_global(struct list_head *list)
+{
+    return list_first_entry_or_null(list, uvm_gpu_chunk_t, list_global);
+}
+
 static uvm_gpu_chunk_t *list_first_chunk_of_pid(struct list_head *list, pid_t pid)
 {
     uvm_gpu_chunk_t *chunk;
@@ -1313,6 +1321,7 @@ static NV_STATUS pin_free_chunks_func(uvm_pmm_gpu_t *pmm, uvm_gpu_chunk_t *chunk
 
     if (chunk->state == UVM_PMM_GPU_CHUNK_STATE_FREE) {
         list_del_init(&chunk->list);
+        list_del_init(&chunk->list_global);
         chunk_pin(pmm, chunk);
         if (chunk->parent)
             chunk->parent->suballoc->allocated++;
@@ -1510,6 +1519,9 @@ static void chunk_start_eviction(uvm_pmm_gpu_t *pmm, uvm_gpu_chunk_t *chunk)
     UVM_ASSERT(!list_empty(&chunk->list));
 
     list_del_init(&chunk->list);
+    if (!list_empty(&chunk->list_global))
+        list_del_init(&chunk->list_global);
+
     uvm_gpu_chunk_set_in_eviction(chunk, true);
 }
 
@@ -1529,6 +1541,7 @@ static void root_chunk_update_eviction_list(uvm_pmm_gpu_t *pmm, uvm_gpu_chunk_t 
 
         if (used) {
             gpu_chunks_used_by_pid_move_tail(&chunk->list, list, pid);
+            list_move_tail(&chunk->list_global, &pmm->root_chunks.va_block_used_global);
         } else {
             list_move_tail(&chunk->list, list);
         }
@@ -1580,9 +1593,13 @@ static uvm_gpu_root_chunk_t *pick_root_chunk_to_evict(uvm_pmm_gpu_t *pmm, pid_t 
         // TODO: Bug 1765193: Move the chunks to the tail of the used list whenever
         // they get mapped.
         if (!chunk) {
-            gpu_chunks_used_by_pid = gpu_chunks_used_by_pid_find(&pmm->root_chunks.va_block_used, pid);
-            if (gpu_chunks_used_by_pid)
-                chunk = list_first_chunk(&gpu_chunks_used_by_pid->gpu_chunks);
+            if (pid == 0) {
+                chunk = list_first_chunk_global(&pmm->root_chunks.va_block_used_global);
+            } else {
+                gpu_chunks_used_by_pid = gpu_chunks_used_by_pid_find(&pmm->root_chunks.va_block_used, pid);
+                if (gpu_chunks_used_by_pid)
+                    chunk = list_first_chunk(&gpu_chunks_used_by_pid->gpu_chunks);
+            }
         }
 
         break;
@@ -1749,6 +1766,7 @@ static uvm_gpu_chunk_t *find_free_chunk_locked(uvm_pmm_gpu_t *pmm,
             // but there is a window between when a root chunk is chosen for
             // eviction and all of its subchunks are removed from free lists.
             list_del_init(&chunk->list);
+            list_del_init(&chunk->list_global);
         }
         else {
             // Bug 2085760: When NUMA GPU is enabled, also check that the root
@@ -2034,6 +2052,7 @@ static void init_root_chunk(uvm_pmm_gpu_t *pmm,
     UVM_ASSERT(chunk->va_block == NULL);
     UVM_ASSERT(chunk->va_block_page_index == PAGES_PER_UVM_VA_BLOCK);
     UVM_ASSERT(list_empty(&chunk->list));
+    UVM_ASSERT(list_empty(&chunk->list_global));
     UVM_ASSERT(uvm_gpu_chunk_get_size(chunk) == UVM_CHUNK_SIZE_MAX);
     UVM_ASSERT(!root_chunk_has_elevated_page(pmm, root_chunk));
 
@@ -2195,6 +2214,7 @@ void free_root_chunk(uvm_pmm_gpu_t *pmm, uvm_gpu_root_chunk_t *root_chunk, free_
                    uvm_pmm_gpu_chunk_state_string(chunk->state),
                    uvm_gpu_name(gpu));
     UVM_ASSERT(list_empty(&chunk->list));
+    UVM_ASSERT(list_empty(&chunk->list_global));
 
     chunk_unpin(pmm, chunk, UVM_PMM_GPU_CHUNK_STATE_PMA_OWNED);
 
@@ -2277,6 +2297,7 @@ NV_STATUS split_gpu_chunk(uvm_pmm_gpu_t *pmm, uvm_gpu_chunk_t *chunk)
         subchunk->va_block_page_index = PAGES_PER_UVM_VA_BLOCK;
         subchunk->is_zero = chunk->is_zero;
         INIT_LIST_HEAD(&subchunk->list);
+        INIT_LIST_HEAD(&subchunk->list_global);
 
         // The child inherits the parent's state.
         subchunk->state = chunk->state;
@@ -2401,6 +2422,7 @@ static void chunk_free_locked(uvm_pmm_gpu_t *pmm, uvm_gpu_chunk_t *chunk)
         UVM_ASSERT(chunk->va_block != NULL);
         UVM_ASSERT(chunk->va_block_page_index != PAGES_PER_UVM_VA_BLOCK);
         UVM_ASSERT(list_empty(&chunk->list));
+        UVM_ASSERT(list_empty(&chunk->list_global));
         chunk->va_block = NULL;
         chunk->va_block_page_index = PAGES_PER_UVM_VA_BLOCK;
         chunk->is_zero = false;
@@ -2494,6 +2516,7 @@ static uvm_gpu_chunk_t *free_or_prepare_for_merge(uvm_pmm_gpu_t *pmm, uvm_gpu_ch
         UVM_ASSERT(subchunk->state == UVM_PMM_GPU_CHUNK_STATE_FREE);
 
         list_del_init(&subchunk->list);
+        list_del_init(&subchunk->list_global);
         subchunk->state = UVM_PMM_GPU_CHUNK_STATE_TEMP_PINNED;
     }
     root_chunk_from_chunk(pmm, chunk)->chunk.suballoc->pinned_leaf_chunks += num_subchunks(chunk->parent);
@@ -3559,6 +3582,7 @@ static void process_lazy_free(uvm_pmm_gpu_t *pmm)
     while (!list_empty(&pmm->root_chunks.va_block_lazy_free)) {
         chunk = list_first_entry(&pmm->root_chunks.va_block_lazy_free, uvm_gpu_chunk_t, list);
         list_del_init(&chunk->list);
+        list_del_init(&chunk->list_global);
         uvm_spin_unlock(&pmm->list_lock);
 
         free_chunk(pmm, chunk);
@@ -3598,6 +3622,7 @@ NV_STATUS uvm_pmm_gpu_init(uvm_pmm_gpu_t *pmm)
         }
     }
     INIT_LIST_HEAD(&pmm->root_chunks.va_block_used);
+    INIT_LIST_HEAD(&pmm->root_chunks.va_block_used_global);
     INIT_LIST_HEAD(&pmm->root_chunks.va_block_unused);
     INIT_LIST_HEAD(&pmm->root_chunks.va_block_lazy_free);
     nv_kthread_q_item_init(&pmm->root_chunks.va_block_lazy_free_q_item, process_lazy_free_entry, pmm);
@@ -3652,6 +3677,7 @@ NV_STATUS uvm_pmm_gpu_init(uvm_pmm_gpu_t *pmm)
         uvm_gpu_chunk_t *chunk = &pmm->root_chunks.array[i].chunk;
 
         INIT_LIST_HEAD(&chunk->list);
+        INIT_LIST_HEAD(&chunk->list_global);
         chunk->gpu_index = uvm_id_gpu_index(gpu->id);
         chunk->state = UVM_PMM_GPU_CHUNK_STATE_PMA_OWNED;
         uvm_gpu_chunk_set_size(chunk, UVM_CHUNK_SIZE_MAX);

@@ -292,6 +292,8 @@ struct uvm_gpu_chunk_struct
     // chunk is unpinned or freed.
     struct list_head list;
 
+    struct list_head list_global;
+
     // The VA block using the chunk, if any.
     // User chunks that are not backed by a VA block are considered to be
     // temporarily pinned and cannot be evicted.
@@ -353,8 +355,11 @@ typedef struct uvm_pmm_gpu_struct
         // uvm_pmm_gpu_mark_root_chunk_(un)used().
         struct list_head va_block_unused;
 
-        // List of root chunks used by VA blocks
+        // List of root chunks used by VA blocks grouped by pid
         struct list_head va_block_used;
+
+        // List of root chunks used by VA blocks in global
+        struct list_head va_block_used_global;
 
         // List of chunks needing to be lazily freed and a queue for processing
         // the list. TODO: Bug 3881835: revisit whether to use nv_kthread_q_t
