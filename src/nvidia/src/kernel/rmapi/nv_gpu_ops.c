@@ -11437,6 +11437,7 @@ NV_STATUS nvGpuOpsCtrlCmdOperateChannelGroup(NvProcessorUuid *uuid,
                         pParams,
                         dataSize));
     os_get_current_time(&rmapiEndTimeSec, &rmapiEndTimeUSec);
+    // [GVM] TODO: (YIFAN) remove this after debugging
     if (cmd == NVA06C_CTRL_CMD_SET_TIMESLICE || cmd == NVA06C_CTRL_CMD_PREEMPT || cmd == NVA06C_CTRL_CMD_SET_INTERLEAVE_LEVEL || cmd == NVA06C_CTRL_CMD_MAKE_REALTIME || cmd == NVA06C_CTRL_CMD_GPFIFO_SCHEDULE) {
         NV_PRINTF(LEVEL_ERROR,
                 "cmd 0x%x spent %d us with type %d\n",
@@ -11511,6 +11512,7 @@ NV_STATUS nvGpuOpsCtrlCmdOperateChannel(gpuRetainedChannel *retainedChannel,
                         dataSize));
     os_get_current_time(&rmapiEndTimeSec, &rmapiEndTimeUSec);
 
+    // [GVM] TODO: (YIFAN) remove this after debugging
     if (cmd == NVA06F_CTRL_CMD_BIND || cmd == NVA06F_CTRL_CMD_STOP_CHANNEL || cmd == NVA06F_CTRL_CMD_GPFIFO_SCHEDULE) {
         NV_PRINTF(LEVEL_ERROR, "%s: cmd 0x%x spent %d us\n", __FUNCTION__, cmd, (rmapiEndTimeSec * 1000000 + rmapiEndTimeUSec) - (rmapiStartTimeSec * 1000000 + rmapiStartTimeUSec));
     }
