@@ -1314,7 +1314,7 @@ int uvm_debugfs_api_set_interleave_level(uvm_va_space_t *va_space, uvm_gpu_id_t 
                 .tsgInterleaveLevel = interleave_level
             }
         },
-        .dataSize = sizeof(NVA06C_CTRL_CMD_SET_INTERLEAVE_LEVEL),
+        .dataSize = sizeof(NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS),
         .rmStatus = 0
     };
     int error = 0;
