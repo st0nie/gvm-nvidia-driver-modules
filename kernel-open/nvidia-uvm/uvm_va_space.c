@@ -229,6 +229,8 @@ NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va
     if (uvm_init_gpu_cgroup(va_space) && va_space->gpu_cgroup)
         gvm_debugfs_create_process_dir(va_space->pid);
 
+    atomic64_set(&va_space->num_debugfs_refs, 0);
+
     if (!va_space->gpu_cgroup)
         return NV_ERR_NO_MEMORY;
 
@@ -510,6 +512,8 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
     uvm_mutex_lock(&g_uvm_global.va_spaces.lock);
     list_del(&va_space->list_node);
     uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
+
+    while (atomic64_read(&va_space->num_debugfs_refs));
 
     uvm_perf_heuristics_stop(va_space);
 

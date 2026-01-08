@@ -256,6 +256,8 @@ struct uvm_va_space_struct
     // Monotonically increasing counter for range groups IDs
     atomic64_t range_group_id_counter;
 
+    atomic64_t num_debugfs_refs;
+
     // Range groups
     struct radix_tree_root range_groups;
     uvm_range_tree_t range_group_ranges;

@@ -39,7 +39,8 @@ static struct file *_gvm_fget_task(struct task_struct *task, unsigned int fd);
 static int _gvm_get_active_gpu_count(void);
 static uvm_va_space_t *_gvm_find_va_space_by_pid(pid_t pid);
 static uvm_gpu_cgroup_t *_gvm_find_gpu_cgroup_by_pid(pid_t pid);
-static size_t _gvm_find_va_spaces_by_pid(pid_t pid, uvm_va_space_t **va_spaces, size_t size);
+static size_t _gvm_find_and_acquire_va_spaces_by_pid(pid_t pid, uvm_va_space_t **va_spaces, size_t size);
+static size_t _gvm_release_va_spaces(uvm_va_space_t **va_spaces, size_t size);
 
 //
 // Per-process debugfs file operations
@@ -77,11 +78,6 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
     size_t limit;
     int error;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
-
-    if (va_space_count == 0)
-        return -ENOENT;
-
     if (count >= sizeof(buf))
         return -EINVAL;
 
@@ -94,13 +90,19 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
     if (error != 0)
         return error;
 
-    for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
-        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
-        va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit = limit;
+    va_space_count = _gvm_find_and_acquire_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    if (va_space_count == 0)
+        return -ENOENT;
 
+    for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
+        if (va_spaces[va_space_index]->gpu_cgroup == NULL)
+            continue;
+
+        va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit = limit;
         uvm_debugfs_api_charge_gpu_memory_limit(va_spaces[va_space_index], gpu_debugfs->gpu_id, va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_current, limit);
     }
 
+    _gvm_release_va_spaces(va_spaces, va_space_count);
     return count;
 }
 
@@ -136,11 +138,6 @@ static ssize_t gvm_process_memory_priority_write(struct file *file, const char _
     size_t priority;
     int error;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
-
-    if (va_space_count == 0)
-        return -ENOENT;
-
     if (count >= sizeof(buf))
         return -EINVAL;
 
@@ -158,11 +155,18 @@ static ssize_t gvm_process_memory_priority_write(struct file *file, const char _
         return -EINVAL;
     }
 
+    va_space_count = _gvm_find_and_acquire_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    if (va_space_count == 0)
+        return -ENOENT;
+
     for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
-        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        if (va_spaces[va_space_index]->gpu_cgroup == NULL)
+            continue;
+
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_priority = priority;
     }
 
+    _gvm_release_va_spaces(va_spaces, va_space_count);
     return count;
 }
 
@@ -236,11 +240,6 @@ static ssize_t gvm_process_memory_recommend_write(struct file *file, const char 
     size_t recommend;
     int error;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
-
-    if (va_space_count == 0)
-        return -ENOENT;
-
     if (count >= sizeof(buf))
         return -EINVAL;
 
@@ -253,11 +252,18 @@ static ssize_t gvm_process_memory_recommend_write(struct file *file, const char 
     if (error != 0)
         return error;
 
+    va_space_count = _gvm_find_and_acquire_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    if (va_space_count == 0)
+        return -ENOENT;
+
     for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
-        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        if (va_spaces[va_space_index]->gpu_cgroup == NULL)
+            continue;
+
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_recommend = recommend;
     }
 
+    _gvm_release_va_spaces(va_spaces, va_space_count);
     return count;
 }
 
@@ -293,11 +299,6 @@ static ssize_t gvm_process_compute_priority_write(struct file *file, const char 
     char buf[32];
     size_t priority;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
-
-    if (va_space_count == 0)
-        return -ENOENT;
-
     if (count >= sizeof(buf))
         return -EINVAL;
 
@@ -312,20 +313,25 @@ static ssize_t gvm_process_compute_priority_write(struct file *file, const char 
 
     if (priority > GVM_MIN_PRIORITY) {
         UVM_ERR_PRINT("priority should range from 0 to %d but got %lu\n", GVM_MIN_PRIORITY, priority);
-        error = -EINVAL;
-        goto out;
+        return -EINVAL;
     }
 
+    va_space_count = _gvm_find_and_acquire_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    if (va_space_count == 0)
+        return -ENOENT;
+
     for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
-        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        if (va_spaces[va_space_index]->gpu_cgroup == NULL)
+            continue;
+
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_priority = priority;
 
-        if ((error = uvm_debugfs_api_set_timeslice(va_spaces[va_space_index], gpu_debugfs->gpu_id, GVM_MAX_TIMESLICE_US >> priority)) != 0)
+        error = uvm_debugfs_api_set_timeslice(va_spaces[va_space_index], gpu_debugfs->gpu_id, GVM_MAX_TIMESLICE_US >> priority);
+        if (error)
             break;
     }
 
-
-out:
+    _gvm_release_va_spaces(va_spaces, va_space_count);
     return error ? error : count;
 }
 
@@ -361,11 +367,6 @@ static ssize_t gvm_process_compute_freeze_write(struct file *file, const char __
     char buf[32];
     size_t freeze;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
-
-    if (va_space_count == 0)
-        return -ENOENT;
-
     if (count >= sizeof(buf))
         return -EINVAL;
 
@@ -380,22 +381,25 @@ static ssize_t gvm_process_compute_freeze_write(struct file *file, const char __
 
     if (freeze > 1) {
         UVM_ERR_PRINT("freeze should be 0 or 1 but got %lu\n", freeze);
-        error = -EINVAL;
-        goto out;
+        return -EINVAL;
     }
 
+    va_space_count = _gvm_find_and_acquire_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    if (va_space_count == 0)
+        return -ENOENT;
+
     for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
-        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        if (va_spaces[va_space_index]->gpu_cgroup == NULL)
+            continue;
+
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_freeze = freeze;
 
         error = uvm_debugfs_api_schedule_task(va_spaces[va_space_index], gpu_debugfs->gpu_id, freeze);
-
         if (error)
             break;
     }
 
-
-out:
+    _gvm_release_va_spaces(va_spaces, va_space_count);
     return error ? error : count;
 }
 
@@ -431,11 +435,6 @@ static ssize_t gvm_process_compute_realtime_write(struct file *file, const char 
     char buf[32];
     size_t realtime;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
-
-    if (va_space_count == 0)
-        return -ENOENT;
-
     if (count >= sizeof(buf))
         return -EINVAL;
 
@@ -450,22 +449,25 @@ static ssize_t gvm_process_compute_realtime_write(struct file *file, const char 
 
     if (realtime > 1) {
         UVM_ERR_PRINT("realtime should be 0 or 1 but got %lu\n", realtime);
-        error = -EINVAL;
-        goto out;
+        return -EINVAL;
     }
 
+    va_space_count = _gvm_find_and_acquire_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    if (va_space_count == 0)
+        return -ENOENT;
+
     for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
-        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        if (va_spaces[va_space_index]->gpu_cgroup == NULL)
+            continue;
+
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_realtime = realtime;
 
         error = uvm_debugfs_api_make_realtime(va_spaces[va_space_index], gpu_debugfs->gpu_id, realtime);
-
         if (error)
             break;
     }
 
-
-out:
+    _gvm_release_va_spaces(va_spaces, va_space_count);
     return error ? error : count;
 }
 
@@ -501,11 +503,6 @@ static ssize_t gvm_process_compute_interleave_level_write(struct file *file, con
     char buf[32];
     size_t interleave_level;
 
-    va_space_count = _gvm_find_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
-
-    if (va_space_count == 0)
-        return -ENOENT;
-
     if (count >= sizeof(buf))
         return -EINVAL;
 
@@ -526,22 +523,25 @@ static ssize_t gvm_process_compute_interleave_level_write(struct file *file, con
         NVA06C_CTRL_INTERLEAVE_LEVEL_MEDIUM,
         NVA06C_CTRL_INTERLEAVE_LEVEL_HIGH,
         interleave_level);
-        error = -EINVAL;
-        goto out;
+        return -EINVAL;
     }
 
+    va_space_count = _gvm_find_and_acquire_va_spaces_by_pid(gpu_debugfs->pid, va_spaces, GVM_MAX_VA_SPACES);
+    if (va_space_count == 0)
+        return -ENOENT;
+
     for (va_space_index = 0; va_space_index < va_space_count; ++va_space_index) {
-        UVM_ASSERT(va_spaces[va_space_index]->gpu_cgroup != NULL);
+        if (va_spaces[va_space_index]->gpu_cgroup == NULL)
+            continue;
+
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].compute_interleave_level = interleave_level;
 
         error = uvm_debugfs_api_set_interleave_level(va_spaces[va_space_index], gpu_debugfs->gpu_id, interleave_level);
-
         if (error)
             break;
     }
 
-
-out:
+    _gvm_release_va_spaces(va_spaces, va_space_count);
     return error ? error : count;
 }
 
@@ -1260,7 +1260,7 @@ static uvm_gpu_cgroup_t *_gvm_find_gpu_cgroup_by_pid(pid_t pid)
     return gpu_cgroup;
 }
 
-static size_t _gvm_find_va_spaces_by_pid(pid_t pid, uvm_va_space_t **va_spaces, size_t size)
+static size_t _gvm_find_and_acquire_va_spaces_by_pid(pid_t pid, uvm_va_space_t **va_spaces, size_t size)
 {
     uvm_va_space_t *va_space;
     size_t count = 0;
@@ -1271,6 +1271,7 @@ static size_t _gvm_find_va_spaces_by_pid(pid_t pid, uvm_va_space_t **va_spaces, 
             break;
 
         if (va_space->pid == pid) {
+            atomic64_add(1, &va_space->num_debugfs_refs);
             va_spaces[count] = va_space;
             count += 1;
         }
@@ -1278,6 +1279,16 @@ static size_t _gvm_find_va_spaces_by_pid(pid_t pid, uvm_va_space_t **va_spaces, 
     uvm_mutex_unlock(&g_uvm_global.va_spaces.lock);
 
     return count;
+}
+
+static size_t _gvm_release_va_spaces(uvm_va_space_t **va_spaces, size_t size) {
+    size_t index;
+
+    for (index = 0; index < size; ++index) {
+        atomic64_sub(1, &va_spaces[index]->num_debugfs_refs);
+    }
+
+    return size;
 }
 
 int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size, bool swap) {
