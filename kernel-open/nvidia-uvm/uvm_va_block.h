@@ -1517,6 +1517,7 @@ NV_STATUS uvm_va_block_migrate_locked(uvm_va_block_t *va_block,
                                       uvm_va_block_region_t region,
                                       uvm_processor_id_t dest_id,
                                       uvm_migrate_mode_t mode,
+                                      NvBool eviction,
                                       uvm_tracker_t *out_tracker);
 
 // Write block's data from a CPU buffer

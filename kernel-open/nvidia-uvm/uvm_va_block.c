@@ -122,7 +122,6 @@ static size_t uvm_va_space_evict_batch(struct mm_struct *mm,
             uvm_mutex_lock(&va_block->lock);
             if (uvm_va_block_gpu_state_get(va_block, gpu->id)) {
                 if (block_evict_pages_from_gpu(va_block, gpu, mm, false) == NV_OK) {
-                    uvm_try_charge_gpu_memory_cgroup(va_block, gpu->id, uvm_va_block_size(va_block), false, true);
                     swapped_va_blocks[batch_index] = va_block;
                 }
             }
@@ -2250,7 +2249,7 @@ static NV_STATUS block_alloc_gpu_chunk(uvm_va_block_t *block,
     *out_gpu_chunk = gpu_chunk;
 out:
     if (status == NV_OK)
-        uvm_try_charge_gpu_memory_cgroup(block, gpu->id, size, false, false);
+        uvm_try_charge_gpu_memory_cgroup(block, gpu->id, uvm_gpu_chunk_get_size(gpu_chunk), false, false);
     return status;
 }
 
@@ -4654,10 +4653,8 @@ static NV_STATUS block_copy_resident_pages_mask(uvm_va_block_t *block,
                 if (status != NV_OK)
                     break;
             }
-            if (block_context->make_resident.cause == UVM_MAKE_RESIDENT_CAUSE_REPLAYABLE_FAULT) {
-                if (UVM_ID_IS_GPU(dst_id) && *copied_pages_out > 0)
-                    uvm_try_charge_gpu_memory_cgroup(block, dst_id, *copied_pages_out * PAGE_SIZE, true, true);
-            }
+            if (status == NV_OK && block_context->make_resident.cause == UVM_MAKE_RESIDENT_CAUSE_REPLAYABLE_FAULT && UVM_ID_IS_GPU(dst_id))
+                uvm_try_charge_gpu_memory_cgroup(block, dst_id, *copied_pages_out * PAGE_SIZE, true, true);
         }
         else {
             status = block_copy_resident_pages_from(block,
@@ -4672,7 +4669,8 @@ static NV_STATUS block_copy_resident_pages_mask(uvm_va_block_t *block,
                                                     migrated_pages,
                                                     copied_pages_out,
                                                     tracker_out);
-
+            if (status == NV_OK && block_context->make_resident.cause == UVM_MAKE_RESIDENT_CAUSE_EVICTION && UVM_ID_IS_CPU(dst_id))
+                uvm_try_charge_gpu_memory_cgroup(block, src_id, *copied_pages_out * PAGE_SIZE, false, true);
         }
 
         UVM_ASSERT(*copied_pages_out <= max_pages_to_copy);
@@ -9622,6 +9620,7 @@ static NV_STATUS block_evict_pages_from_gpu(uvm_va_block_t *va_block, uvm_gpu_t 
                                                  subregion,
                                                  UVM_ID_CPU,
                                                  (map) ? UVM_MIGRATE_MODE_MAKE_RESIDENT_AND_MAP : UVM_MIGRATE_MODE_MAKE_RESIDENT,
+                                                 !map,
                                                  NULL);
         }
 

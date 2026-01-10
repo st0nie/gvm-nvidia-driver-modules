@@ -1425,7 +1425,6 @@ static NV_STATUS evict_root_chunk(uvm_pmm_gpu_t *pmm, uvm_gpu_root_chunk_t *root
         if (status != NV_OK)
             goto error;
         uvm_try_charge_gpu_memory_cgroup(evict.va_block_to_evict_from, uvm_pmm_to_gpu(pmm)->id, uvm_gpu_chunk_get_size(&(root_chunk->chunk)), true, false);
-        uvm_try_charge_gpu_memory_cgroup(evict.va_block_to_evict_from, uvm_pmm_to_gpu(pmm)->id, uvm_gpu_chunk_get_size(&(root_chunk->chunk)), false, true);
     }
 
     // All of the leaf chunks should be pinned now, merge them all back into a
@@ -1664,7 +1663,7 @@ static NV_STATUS pick_and_evict_root_chunk(uvm_pmm_gpu_t *pmm,
         if (chunk->va_block) {
             va_space = uvm_va_block_get_va_space_maybe_dead(chunk->va_block);
             if (va_space) {
-                memory_current = va_space->gpu_cgroup[uvm_id_gpu_index(gpu->id)].memory_current;
+                memory_current = atomic64_read(&(va_space->gpu_cgroup[uvm_id_gpu_index(gpu->id)].memory_current));
                 memory_limit = va_space->gpu_cgroup[uvm_id_gpu_index(gpu->id)].memory_limit;
             }
         }

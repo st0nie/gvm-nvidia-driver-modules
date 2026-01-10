@@ -94,7 +94,8 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
             continue;
 
         va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit = limit;
-        uvm_debugfs_api_charge_gpu_memory_limit(va_spaces[va_space_index], gpu_debugfs->gpu_id, va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_current, limit);
+        uvm_debugfs_api_charge_gpu_memory_limit(va_spaces[va_space_index], gpu_debugfs->gpu_id,
+                atomic64_read(&(va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_current)), limit);
     }
 
     _gvm_release_va_spaces(va_spaces, va_space_count);
@@ -115,7 +116,7 @@ static int gvm_process_memory_current_show(struct seq_file *m, void *data)
     if (!gpu_cgroup)
         return -ENOENT;
 
-    seq_printf(m, "%zu\n", gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_current);
+    seq_printf(m, "%llu\n", atomic64_read(&(gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_current)));
 
     return 0;
 }
@@ -134,7 +135,7 @@ static int gvm_process_memory_swap_current_show(struct seq_file *m, void *data)
     if (!gpu_cgroup)
         return -ENOENT;
 
-    seq_printf(m, "%zu\n", gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_swap_current);
+    seq_printf(m, "%llu\n", atomic64_read(&(gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_swap_current)));
 
     return 0;
 }
@@ -533,8 +534,8 @@ int gvm_debugfs_create_gpu_dir(pid_t pid, uvm_gpu_id_t gpu_id)
     if (va_space) {
         UVM_ASSERT(va_space->gpu_cgroup != NULL);
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_limit = -1ULL;
-        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current = 0;
-        va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current = 0;
+        atomic64_set(&(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current), 0);
+        atomic64_set(&(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current), 0);
 
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_priority = GVM_MIN_PRIORITY / 2;
         va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].compute_freeze = 0;
@@ -769,28 +770,29 @@ static size_t _gvm_release_va_spaces(uvm_va_space_t **va_spaces, size_t size) {
 
 int try_charge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size, bool swap) {
     UVM_ASSERT(va_space->gpu_cgroup);
-    size_t *memcg_current = (swap) ? &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current) :
+    atomic64_t *memcg_current = (swap) ? &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current) :
         &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current);
-    *memcg_current += size;
+    atomic64_add(size, memcg_current);
     return 0;
 }
 
 int try_uncharge_gpu_memcg_debugfs(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id, size_t size, bool swap) {
     UVM_ASSERT(va_space->gpu_cgroup);
-    size_t *memcg_current = (swap) ? &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current) :
+    long long int old_value, new_value;
+    atomic64_t *memcg_current = (swap) ? &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_swap_current) :
         &(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current);
-    if (*memcg_current > size) {
-        *memcg_current -= size;
-    }
-    else {
-        *memcg_current = 0;
-    }
+
+    do {
+        old_value = atomic64_read(memcg_current);
+        new_value = (old_value > size) ? old_value - size : 0;
+    } while (!atomic64_try_cmpxchg(memcg_current, &old_value, new_value));
+
     return 0;
 }
 
 size_t get_gpu_memcg_current(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
     UVM_ASSERT(va_space->gpu_cgroup);
-    return va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current;
+    return atomic64_read(&(va_space->gpu_cgroup[uvm_id_gpu_index(gpu_id)].memory_current));
 }
 
 size_t get_gpu_memcg_limit(uvm_va_space_t *va_space, uvm_gpu_id_t gpu_id) {
