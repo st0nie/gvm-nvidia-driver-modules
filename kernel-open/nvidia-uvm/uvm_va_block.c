@@ -125,13 +125,13 @@ static size_t uvm_va_space_evict_batch(struct mm_struct *mm,
                     swapped_va_blocks[batch_index] = va_block;
                 }
             }
-            uvm_mutex_unlock(&va_block->lock);
+            if (!swapped_va_blocks[batch_index])
+                uvm_mutex_unlock(&va_block->lock);
         }
     }
 
     for (batch_index = 0; batch_index < num_block; ++batch_index) {
         if (swapped_va_blocks[batch_index]) {
-            uvm_mutex_lock(&swapped_va_blocks[batch_index]->lock);
             if (uvm_va_block_gpu_state_get(swapped_va_blocks[batch_index], gpu->id)) {
                 block_destroy_gpu_state(swapped_va_blocks[batch_index], uvm_va_space_block_context(va_space, NULL), gpu->id);
                 total_evicted_bytes += uvm_va_block_size(swapped_va_blocks[batch_index]);

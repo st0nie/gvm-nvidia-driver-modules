@@ -93,9 +93,9 @@ static ssize_t gvm_process_memory_limit_write(struct file *file, const char __us
         if (va_spaces[va_space_index]->gpu_cgroup == NULL)
             continue;
 
-        va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit = limit;
         uvm_debugfs_api_charge_gpu_memory_limit(va_spaces[va_space_index], gpu_debugfs->gpu_id,
                 atomic64_read(&(va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_current)), limit);
+        va_spaces[va_space_index]->gpu_cgroup[uvm_id_gpu_index(gpu_debugfs->gpu_id)].memory_limit = limit;
     }
 
     _gvm_release_va_spaces(va_spaces, va_space_count);
